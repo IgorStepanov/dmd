@@ -632,7 +632,7 @@ dt_t **SymOffExp::toDt(dt_t **pdt)
         var->needThis() ||
         var->isThreadlocal())
     {
-#if 1
+#if 0
         printf("SymOffExp::toDt()\n");
 #endif
         error("non-constant expression %s", toChars());
@@ -643,7 +643,7 @@ dt_t **SymOffExp::toDt(dt_t **pdt)
 
 dt_t **VarExp::toDt(dt_t **pdt)
 {
-    printf("VarExp::toDt() %d\n", op);
+    //printf("VarExp::toDt() %d\n", op);
     pdt = dtend(pdt);
 
     VarDeclaration *v = var->isVarDeclaration();
