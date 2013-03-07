@@ -623,6 +623,9 @@ var.obj : $C\var.c optab.c
 tk.obj : tk.c
 	$(CC) -c $(MFLAGS) tk.c
 
+ctfexpr.obj : ctfe.h $C\dt.h ctfexpr.c
+	$(CC) -c -I$(ROOT) $(MFLAGS) ctfexpr
+
 # Root
 aav.obj : $(ROOT)\aav.h $(ROOT)\aav.c
 	$(CC) -c $(CFLAGS) $(ROOT)\aav.c
@@ -699,7 +702,6 @@ inifile.obj : $(TOTALH) inifile.c
 init.obj : $(TOTALH) init.h init.c
 inline.obj : $(TOTALH) inline.c
 interpret.obj : $(TOTALH) interpret.c declaration.h expression.h ctfe.h
-ctfexpr.obj : $(TOTALH) ctfeexpr.c ctfe.h
 intrange.obj : $(TOTALH) intrange.h intrange.c
 json.obj : $(TOTALH) json.h json.c
 lexer.obj : $(TOTALH) lexer.c

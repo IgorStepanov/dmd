@@ -25,7 +25,7 @@
 #include "target.h"
 #include "init.h"
 // Back end
-#include        "backend/dt.h"
+#include        "dt.h"
 int RealEquals(real_t x1, real_t x2);
 
 /************** ClassReferenceExp ********************************************/
