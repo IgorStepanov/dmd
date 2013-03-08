@@ -623,8 +623,8 @@ var.obj : $C\var.c optab.c
 tk.obj : tk.c
 	$(CC) -c $(MFLAGS) tk.c
 
-ctfexpr.obj : ctfe.h $C\dt.h ctfexpr.c
-	$(CC) -c -I$(ROOT) $(MFLAGS) ctfexpr
+ctfeexpr.obj : ctfe.h $C\dt.h ctfeexpr.c
+	$(CC) -c -I$(ROOT) $(MFLAGS) ctfeexpr
 
 # Root
 aav.obj : $(ROOT)\aav.h $(ROOT)\aav.c
