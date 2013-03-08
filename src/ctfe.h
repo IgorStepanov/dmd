@@ -14,6 +14,7 @@
 #pragma once
 #endif /* __DMC__ */
 
+#include "arraytypes.h"
 
 /**
    Global status of the CTFE engine. Mostly used for performance diagnostics
@@ -39,7 +40,7 @@ struct CtfeStatus
   A reference to a class, or an interface. We need this when we
   point to a base class (we must record what the type is).
  */
-typedef ArrayBase<dt_t> Dts;
+
 struct ClassReferenceExp : Expression
 {
     StructLiteralExp *value;

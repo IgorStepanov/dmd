@@ -30,11 +30,10 @@
 #include        "declaration.h"
 #include        "target.h"
 #include        "ctfe.h"
-
+#include        "arraytypes.h"
 // Back end
 #include        "dt.h"
 
-typedef ArrayBase<dt_t> Dts;
 
 /* ================================================================ */
 

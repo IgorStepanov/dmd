@@ -107,36 +107,7 @@ int ClassReferenceExp::findFieldIndexByName(VarDeclaration *v)
 
 dt_t **ClassReferenceExp::toDt(dt_t **pdt)
 {
-#if 0
-    printf("ClassReferenceExp::toDt() %d\n", op);
-#endif
-		dt_t *d = NULL;
-    dt_t **pdtend = &d;
-
-		
-    Dts dts;
-    dts.setDim(value->elements->dim);
-    dts.zero();
-    //assert(value->elements->dim <= value->sd->fields.dim);
-    for (size_t i = 0; i < value->elements->dim; i++)
-    {
-        Expression *e = (*value->elements)[i];
-        if (!e)
-            continue;
-        dt_t *dt = NULL;
-        e->toDt(&dt);           // convert e to an initializer dt
-        dts[i] = dt;
-    }
-		
-		
-		dtxoff(pdtend, originalClass()->toVtblSymbol(), 0);
-    dtsize_t(pdtend, 0);                    // monitor
-    // Put in the rest
-    toDt2(&d, originalClass(), dts);
-
-		dtdtoff(pdt, d, 0);
-    
-    return pdt;
+    return toDtI(pdt, 0);
 }
 
 dt_t **ClassReferenceExp::toDtI(dt_t **pdt, int off)
@@ -173,22 +144,19 @@ dt_t **ClassReferenceExp::toDtI(dt_t **pdt, int off)
     return pdt;
 }
 
+// Generates the data for the static initializer of class variable.
+// dts is an array of dt fields, which values have been evaluated in compile time.
+// cd - is a ClassDeclaration, for which initializing data is being built
+// this function, being alike to ClassDeclaration::toDt2, recursively builds the dt for all base classes.
 
 dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
 {
-
-
-
     unsigned offset;
-    dt_t *dt;
     unsigned csymoffset;
-
-
-		
 #define LOG 0
 
 #if LOG
-    printf("ClassDeclaration::toDt2(this = '%s', cd = '%s')\n", toChars(), cd->toChars());
+    printf("ClassReferenceExp::toDt2(this = '%s', cd = '%s')\n", toChars(), cd->toChars());
 #endif
     if (cd->baseClass)
     {
@@ -200,7 +168,6 @@ dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
         offset = Target::ptrsize * 2;
     }
 
-    // Note equivalence of this loop to struct's
     for (size_t i = 0; i < cd->fields.dim; i++)
     {
         VarDeclaration *v = cd->fields[i];
@@ -210,12 +177,8 @@ dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
 				
 				if(!d)
 				{
-            Initializer *init;
-
-            
-            //printf("\t\tv = '%s' v->offset = %2d, offset = %2d\n", v->toChars(), v->offset, offset);
-            dt = NULL;
-            init = v->init;
+            dt_t *dt = NULL;
+            Initializer *init = v->init;
             if (init)
             {   //printf("\t\t%s has initializer %s\n", v->toChars(), init->toChars());
                 ExpInitializer *ei = init->isExpInitializer();
