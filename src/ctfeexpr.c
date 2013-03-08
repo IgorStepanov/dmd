@@ -286,6 +286,7 @@ dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
         dtnzeros(pdt, cd->structsize - offset);
 
 #undef LOG
+    return pdt;
 }
 
 
