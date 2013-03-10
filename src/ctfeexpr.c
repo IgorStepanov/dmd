@@ -22,9 +22,6 @@
 #include "template.h"
 #include "ctfe.h"
 
-#include "target.h"
-#include "init.h"
-
 int RealEquals(real_t x1, real_t x2);
 
 /************** ClassReferenceExp ********************************************/
