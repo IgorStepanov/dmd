@@ -916,7 +916,7 @@ bool hasNonConstPointers(Expression *e)
         if (e->op == TOKint64)  // cast(void *)int is OK
             return false;
         if (e->op == TOKstring) // "abc".ptr is OK
-            return false;           
+            return false;
         return true;
     }
     return false;

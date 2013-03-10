@@ -326,8 +326,8 @@ code.o: $C/code.c
 constfold.o: constfold.c
 	$(CC) -c $(CFLAGS) $<
 
-ctfeexpr.o: ctfeexpr.c ctfe.h $C/dt.h
-	$(CC) -c $(MFLAGS) -I$(ROOT) $<
+ctfeexpr.o: ctfeexpr.c ctfe.h
+	$(CC) -c $(CFLAGS) $<
 
 irstate.o: irstate.c irstate.h
 	$(CC) -c $(MFLAGS) -I$(ROOT) $<
