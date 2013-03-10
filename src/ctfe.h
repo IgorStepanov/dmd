@@ -57,7 +57,7 @@ struct ClassReferenceExp : Expression
     int findFieldIndexByName(VarDeclaration *v);
 		dt_t **toDt(dt_t **pdt);
     dt_t **toDtI(dt_t **pdt, int offset);
-		dt_t **toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts);
+		dt_t **toDt2(dt_t **pdt, ClassDeclaration *cd, Dts* dts);
 };
 
 /// Return index of the field, or -1 if not found

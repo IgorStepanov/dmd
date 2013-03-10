@@ -987,7 +987,7 @@ dt_t **ClassReferenceExp::toDtI(dt_t **pdt, int off)
 		dtxoff(pdtend, originalClass()->toVtblSymbol(), 0);
     dtsize_t(pdtend, 0);                    // monitor
     // Put in the rest
-    toDt2(&d, originalClass(), dts);
+    toDt2(&d, originalClass(), &dts);
     
 		dtdtoff(pdt, d, off);
     
@@ -999,7 +999,7 @@ dt_t **ClassReferenceExp::toDtI(dt_t **pdt, int off)
 // cd - is a ClassDeclaration, for which initializing data is being built
 // this function, being alike to ClassDeclaration::toDt2, recursively builds the dt for all base classes.
 
-dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
+dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts* dts)
 {
     unsigned offset;
     unsigned csymoffset;
@@ -1021,12 +1021,12 @@ dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
     for (size_t i = 0; i < cd->fields.dim; i++)
     {
         VarDeclaration *v = cd->fields[i];
-				int idx = findFieldIndexByName(v);
-				assert(idx != -1);
-				dt_t *d = dts[idx];
+        int idx = findFieldIndexByName(v);
+        assert(idx != -1);
+        dt_t *d = (*dts)[idx];
 				
-				if(!d)
-				{
+        if(!d)
+        {
             dt_t *dt = NULL;
             Initializer *init = v->init;
             if (init)
@@ -1056,7 +1056,7 @@ dt_t ** ClassReferenceExp::toDt2(dt_t **pdt, ClassDeclaration *cd, Dts& dts)
                     offset = v->offset + v->type->size();
                 }
             }
-				}
+        }
         else
         {
           if (v->offset < offset)
