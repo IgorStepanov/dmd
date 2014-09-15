@@ -1387,6 +1387,29 @@ Type *toStaticArrayType(SliceExp *e)
 
 /* ==================== castTo ====================== */
 
+static bool atCastTo(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    Type *t = (Type*)ctx;
+    unsigned oldatt = e->type->att;
+    e->type->att |= RECtracing;
+    MATCH m = e->type->implicitConvTo(t);
+    e->type->att = oldatt;
+
+    if (m != MATCHnomatch)
+    {
+        *outexpr = e;
+        if (m == MATCHexact)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
 /**************************************
  * Do an explicit cast.
  * Assume that the 'this' expression does not have any indirections.
@@ -1452,7 +1475,7 @@ Expression *castTo(Expression *e, Scope *sc, Type *t)
             if (AggregateDeclaration *t1ad = isAggregate(t1b))
             {
                 AggregateDeclaration *toad = isAggregate(tob);
-                if (t1ad != toad && t1ad->aliasthis)
+                if (t1ad != toad && t1ad->aliasThisSymbols)
                 {
                     if (t1b->ty == Tclass && tob->ty == Tclass)
                     {
@@ -1463,14 +1486,42 @@ Expression *castTo(Expression *e, Scope *sc, Type *t)
                              goto L1;
                     }
 
-                    /* Forward the cast to our alias this member, rewrite to:
-                     *   cast(to)e1.aliasthis
-                     */
-                    result = resolveAliasThis(sc, e);
-                    result = result->castTo(sc, t);
                     //result = new CastExp(e->loc, ex, t);
                     //result = result->semantic(sc);
-                    return;
+                    bool tryaliasthis = true;
+                    if (tob->ty == Tstruct && ((TypeStruct *)t1b)->sym == ((TypeStruct *)tob)->sym)
+                    {
+                        tryaliasthis = false;
+                    }
+                    else if (t1b->ty == Tclass && tob->ty == Tclass)
+                    {
+                        ClassDeclaration *t1cd = t1b->isClassHandle();
+                        ClassDeclaration *tocd = tob->isClassHandle();
+                        int offset;
+                        if (tocd->isBaseOf(t1cd, &offset))
+                             goto L1;
+                    }
+                    if (tryaliasthis)
+                    {
+                        Expressions results;
+                        iterateAliasThis(sc, e, &atCastTo, t, &results);
+                        if (results.dim == 1)
+                        {
+                            results[0] = results[0]->castTo(sc, t);
+                            result = results[0];
+                            return;
+                        }
+                        else if (results.dim > 1)
+                        {
+                            e->error("There are many candidates for cast %s to %s:", e->toChars(), t->toChars());
+                            for (int j = 0; j < results.dim; ++j)
+                            {
+                                e->error("%s", results[j]->toChars());
+                            }
+                            result = new ErrorExp();
+                            return;
+                        }
+                    }
                 }
             }
             else if (tob->ty == Tvector && t1b->ty != Tvector)
@@ -2522,7 +2573,175 @@ bool isVoidArrayLiteral(Expression *e, Type *other)
         ((ArrayLiteralExp *)e)->elements->dim == 0);
 }
 
+static bool atFindSubtypes(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    Expressions *candidates = (Expressions *)ctx;
+    bool duplicate = false;
+    assert(e->type);
+    for (int j = 0; j < candidates->dim; ++j)
+    {
+        if ((*candidates)[j]->type->equals(e->type))
+        {
+            duplicate = true;
+            break;
+        }
+    }
+    if (!duplicate)
+    {
+        *outexpr = e;
+    }
+    return false;
+}
 
+void findAliasThisSubtypes(Scope *sc, Expression *e, Expressions *candidates)
+{
+    if (e->type->ty == Tstruct || e->type->ty == Tclass)
+    {
+        iterateAliasThis(sc, e, &atFindSubtypes, candidates, candidates);
+    }
+}
+
+int typeMerge(Scope *sc, Expression *e, Type **pt, Expression **pe1, Expression **pe2, bool ignorealiastthis = false);
+
+int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expression **pe2)
+{
+    //printf("merge aliasthis: (%s) and (%s)\n", (*pe1)->toChars(), (*pe2)->toChars());
+    assert(*pe1);
+    assert(*pe2);
+    Expression *e1 = *pe1;
+    Expression *e2 = *pe2;
+    AggregateDeclaration *ag1 = NULL;
+    AggregateDeclaration *ag2 = NULL;
+
+    if (e1->type->toBasetype()->ty == Tclass)
+    {
+        ag1 = ((TypeClass*)e1->type->toBasetype())->sym;
+    }
+    else if (e1->type->toBasetype()->ty == Tstruct)
+    {
+        ag1 = ((TypeStruct*)e1->type->toBasetype())->sym;
+    }
+
+    if (e2->type->toBasetype()->ty == Tclass)
+    {
+        ag2 = ((TypeClass*)e2->type->toBasetype())->sym;
+    }
+    else if (e2->type->toBasetype()->ty == Tstruct)
+    {
+        ag2 = ((TypeStruct*)e2->type->toBasetype())->sym;
+    }
+
+    assert(ag1 || ag2);
+
+    Expressions candidates1;
+    Expressions candidates2;
+    if (ag1)
+        findAliasThisSubtypes(sc, e1, &candidates1);
+    if (ag2)
+        findAliasThisSubtypes(sc, e2, &candidates2);
+
+    Expressions candidates1ret;
+    Expressions candidates2ret;
+
+    // try to merge e1.aliasthis and e2
+    if (candidates1.dim)
+    {
+        for (int i = 0; i < candidates1.dim; i++)
+        {
+            unsigned oldatt1 = candidates1[i]->type->att;
+            unsigned oldatt2 = e2->type->att;
+            candidates1[i]->type->att |= RECtracing;
+            e2->type->att |= RECtracing;
+            if (typeMerge(sc, e, pt, &candidates1[i], &e2, true))
+            {
+                candidates1ret.push(candidates1[i]);
+                candidates2ret.push(e2);
+            }
+            e2->type->att = oldatt2;
+            candidates1[i]->type->att = oldatt1;
+        }
+    }
+
+    // try to merge e1 and e2.aliasthis
+    if (candidates2.dim)
+    {
+        for (int i = 0; i < candidates2.dim; i++)
+        {
+            unsigned oldatt1 = e1->type->att;
+            unsigned oldatt2 = candidates2[i]->type->att;
+            e1->type->att |= RECtracing;
+            candidates2[i]->type->att |= RECtracing;
+            if (typeMerge(sc, e, pt, &e1, &candidates2[i], true))
+            {
+                candidates1ret.push(e1);
+                candidates2ret.push(candidates2[i]);
+            }
+            candidates2[i]->type->att = oldatt2;
+            e1->type->att = oldatt1;
+        }
+    }
+
+    assert(candidates1ret.dim == candidates2ret.dim);
+
+    if (candidates1ret.dim == 1)
+    {
+        *pe1 = candidates1ret[0];
+        *pe2 = candidates2ret[0];
+        *pt = candidates1ret[0]->type;
+        return 1;
+    }
+    else if (candidates1ret.dim > 1)
+    {
+        e->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
+        for (int i = 0; i < candidates1ret.dim; i++)
+        {
+            e->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
+        }
+        return 0;
+    }
+
+    // try to merge e1.aliasthis and e2.aliasthis
+    for (int i = 0; i < candidates1.dim; i++)
+    {
+        for (int j = 0; j < candidates2.dim; j++)
+        {
+            unsigned oldatt1 = candidates1[i]->type->att;
+            unsigned oldatt2 = candidates2[i]->type->att;
+            candidates1[i]->type->att |= RECtracing;
+            candidates2[i]->type->att |= RECtracing;
+            if (typeMerge(sc, e, pt, &candidates1[i], &candidates2[j], true))
+            {
+                candidates1ret.push(candidates1[i]);
+                candidates2ret.push(candidates2[j]);
+            }
+            candidates2[i]->type->att = oldatt2;
+            candidates1[i]->type->att = oldatt1;
+        }
+    }
+
+    assert(candidates1ret.dim == candidates2ret.dim);
+
+    if (candidates1ret.dim == 0)
+    {
+        return 0;
+    }
+    else if (candidates1ret.dim == 1)
+    {
+        *pe1 = candidates1ret[0];
+        *pe2 = candidates2ret[0];
+        *pt = candidates1ret[0]->type;
+        return 1;
+    }
+    else
+    {
+        e->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
+        for (int i = 0; i < candidates1ret.dim; i++)
+        {
+            e->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
+        }
+        return 0;
+    }
+}
 /**************************************
  * Combine types.
  * Output:
@@ -2534,7 +2753,7 @@ bool isVoidArrayLiteral(Expression *e, Type *other)
  *      false   failed
  */
 
-bool typeMerge(Scope *sc, TOK op, Type **pt, Expression **pe1, Expression **pe2)
+bool typeMerge(Scope *sc, TOK op, Type **pt, Expression **pe1, Expression **pe2, bool ignorealiastthis)
 {
     //printf("typeMerge() %s op %s\n", (*pe1)->toChars(), (*pe2)->toChars());
 
@@ -2876,130 +3095,110 @@ Lcc:
                     t2 = cd2->type;
                 }
                 else if (cd1)
+                {
                     t1 = cd1->type;
+                }
                 else if (cd2)
+                {
                     t2 = cd2->type;
+                }
+                else if (!ignorealiastthis)
+                {
+                    Expression *te1 = e1;
+                    Expression *te2 = e2;
+                    Type *tt1 = t;
+                    int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                    if (r)
+                    {
+                        e1 = te1;
+                        e2 = te2;
+                        t1 = e1->type;
+                        t2 = e2->type;
+                        t = tt1;
+                    }
+                    else
+                    {
+                        goto Lincompatible;
+                    }
+                }
                 else
+                {
                     goto Lincompatible;
+                }
             }
-            else if (t1->ty == Tstruct && ((TypeStruct *)t1)->sym->aliasthis)
+            else if ((t1->ty == Tstruct || t1->ty == Tclass) && !ignorealiastthis)
             {
-                if (att1 && e1->type == att1)
+                Expression *te1 = e1;
+                Expression *te2 = e2;
+                Type *tt1 = *pt;
+                int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                if (r)
+                {
+                    e1 = te1;
+                    e2 = te2;
+                    t1 = e1->type;
+                    t2 = e2->type;
+                }
+                else
+                {
                     goto Lincompatible;
-                if (!att1 && e1->type->checkAliasThisRec())
-                    att1 = e1->type;
-                //printf("att tmerge(c || c) e1 = %s\n", e1->type->toChars());
-                e1 = resolveAliasThis(sc, e1);
-                t1 = e1->type;
+                }
                 continue;
             }
-            else if (t2->ty == Tstruct && ((TypeStruct *)t2)->sym->aliasthis)
+            else if ((t2->ty == Tstruct || t2->ty == Tclass) && !ignorealiastthis)
             {
-                if (att2 && e2->type == att2)
+                Expression *te1 = e1;
+                Expression *te2 = e2;
+                Type *tt1 = *pt;
+                int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                if (r)
+                {
+                    e1 = te1;
+                    e2 = te2;
+                    t1 = e1->type;
+                    t2 = e2->type;
+                }
+                else
+                {
                     goto Lincompatible;
-                if (!att2 && e2->type->checkAliasThisRec())
-                    att2 = e2->type;
-                //printf("att tmerge(c || c) e2 = %s\n", e2->type->toChars());
-                e2 = resolveAliasThis(sc, e2);
-                t2 = e2->type;
+                }
                 continue;
             }
             else
                 goto Lincompatible;
         }
     }
-    else if (t1->ty == Tstruct && t2->ty == Tstruct)
-    {
-        if (t1->mod != t2->mod)
-        {
-            if (!t1->isImmutable() && !t2->isImmutable() && t1->isShared() != t2->isShared())
-                goto Lincompatible;
-            unsigned char mod = MODmerge(t1->mod, t2->mod);
-            t1 = t1->castMod(mod);
-            t2 = t2->castMod(mod);
-            t = t1;
-            goto Lagain;
-        }
-
-        TypeStruct *ts1 = (TypeStruct *)t1;
-        TypeStruct *ts2 = (TypeStruct *)t2;
-        if (ts1->sym != ts2->sym)
-        {
-            if (!ts1->sym->aliasthis && !ts2->sym->aliasthis)
-                goto Lincompatible;
-
-            MATCH i1 = MATCHnomatch;
-            MATCH i2 = MATCHnomatch;
-
-            Expression *e1b = NULL;
-            Expression *e2b = NULL;
-            if (ts2->sym->aliasthis)
-            {
-                if (att2 && e2->type == att2)
-                    goto Lincompatible;
-                if (!att2 && e2->type->checkAliasThisRec())
-                    att2 = e2->type;
-                //printf("att tmerge(s && s) e2 = %s\n", e2->type->toChars());
-                e2b = resolveAliasThis(sc, e2);
-                i1 = e2b->implicitConvTo(t1);
-            }
-            if (ts1->sym->aliasthis)
-            {
-                if (att1 && e1->type == att1)
-                    goto Lincompatible;
-                if (!att1 && e1->type->checkAliasThisRec())
-                    att1 = e1->type;
-                //printf("att tmerge(s && s) e1 = %s\n", e1->type->toChars());
-                e1b = resolveAliasThis(sc, e1);
-                i2 = e1b->implicitConvTo(t2);
-            }
-            if (i1 && i2)
-                goto Lincompatible;
-
-            if (i1)
-                goto Lt1;
-            else if (i2)
-                goto Lt2;
-
-            if (e1b)
-            {
-                e1 = e1b;
-                t1 = e1b->type->toBasetype();
-            }
-            if (e2b)
-            {
-                e2 = e2b;
-                t2 = e2b->type->toBasetype();
-            }
-            t = t1;
-            goto Lagain;
-        }
-    }
     else if (t1->ty == Tstruct || t2->ty == Tstruct)
     {
-        if (t1->ty == Tstruct && ((TypeStruct *)t1)->sym->aliasthis)
+        if (t1->ty == Tstruct && t2->ty == Tstruct)
         {
-            if (att1 && e1->type == att1)
-                goto Lincompatible;
-            if (!att1 && e1->type->checkAliasThisRec())
-                att1 = e1->type;
-            //printf("att tmerge(s || s) e1 = %s\n", e1->type->toChars());
-            e1 = resolveAliasThis(sc, e1);
-            t1 = e1->type;
-            t = t1;
-            goto Lagain;
+            if (t1->mod != t2->mod)
+            {
+                if (!t1->isImmutable() && !t2->isImmutable() && t1->isShared() != t2->isShared())
+                    goto Lincompatible;
+                unsigned char mod = MODmerge(t1->mod, t2->mod);
+                t1 = t1->castMod(mod);
+                t2 = t2->castMod(mod);
+                t = t1;
+                goto Lagain;
+            }
         }
-        if (t2->ty == Tstruct && ((TypeStruct *)t2)->sym->aliasthis)
+
+        if (!ignorealiastthis)
         {
-            if (att2 && e2->type == att2)
-                goto Lincompatible;
-            if (!att2 && e2->type->checkAliasThisRec())
-                att2 = e2->type;
-            //printf("att tmerge(s || s) e2 = %s\n", e2->type->toChars());
-            e2 = resolveAliasThis(sc, e2);
-            t2 = e2->type;
-            t = t2;
-            goto Lagain;
+            Expression *te1 = e1;
+            Expression *te2 = e2;
+            Type *tt1 = t;
+            int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+            if (r)
+            {
+                e1 = te1;
+                e2 = te2;
+                t1 = e1->type;
+                t2 = e2->type;
+                t = tt1;
+                goto Lagain;
+            }
         }
         goto Lincompatible;
     }
@@ -3207,7 +3406,7 @@ Expression *typeCombine(BinExp *be, Scope *sc)
             goto Lerror;
     }
 
-    if (!typeMerge(sc, be->op, &be->type, &be->e1, &be->e2))
+    if (!typeMerge(sc, be->op, &be->type, &be->e1, &be->e2, be->att1))
         goto Lerror;
     // If the types have no value, return an error
     if (be->e1->op == TOKerror)

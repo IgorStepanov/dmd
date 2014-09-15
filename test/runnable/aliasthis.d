@@ -1804,6 +1804,348 @@ void test13009()
 
 /***************************************************/
 
+struct Test8
+{
+    int a;
+    string b;
+    alias a this;
+    alias b this;
+}
+
+void test8()
+{
+    Test8 t8 = {1, "test"};
+    int a = t8;
+    string b = t8;
+    assert(a == 1);
+    assert(b == "test");
+}
+
+/***************************************************/
+
+struct Test9a
+{
+    short a;
+    string b;
+
+    double d;
+    alias a this;
+    alias b this;
+    alias d this;
+}
+
+struct Test9b
+{
+    int a;
+    string b;
+    alias a this;
+    alias b this;
+}
+
+struct Test9
+{
+    Test9a a;
+    Test9b b;
+    int c;
+    alias a this;
+    alias b this;
+    alias c this;
+}
+
+struct Test9x
+{
+    Test9 t;
+    alias t this;
+}
+
+void test9()
+{
+    Test9 t9;
+    t9.a.a = 1;
+    t9.a.b = "1";
+    t9.b.a = 2;
+    t9.b.b = "2";
+    t9.c = 3;
+
+    static assert(!__traits(compiles, (){string s = t9;})); //t9.a.b vs t9.b.b conflict
+
+    int a = t9; // OK. Test9 explicitly says that it is int subtype and "c" field should be used in int casting
+    assert(a == 3);
+
+    static assert(!__traits(compiles, (){long b = t9;}));    // Can't be unambiguously resolved, because candidates have a different types
+    static assert(!__traits(compiles, (){double d = t9;}));  // and direct alias this isn't exactly casted tot target type.
+
+    static assert(is(Test9 : int));
+    static assert(is(Test9 : string)); // Yes, Test9 is a string subtype (because Test9 is a Test9a subtype and Test9a
+                                       // is a string subtype. However Test9 cannot be casted to string directly, because
+                                       // there are conflict
+    Test9x t9x;
+    t9x.t = t9;
+
+    static assert(!__traits(compiles, (){string s = t9x;})); //t9x.t.a.b vs t9x.t.b.b conflict
+
+    int ax = t9x; // OK. Test9 explicitly says that it is int subtype and "t.c" field should be used in int casting
+    assert(ax == 3);
+
+    static assert(!__traits(compiles, (){long b = t9x;}));    // Can't be unambiguously resolved, because candidates have a different types
+    static assert(!__traits(compiles, (){double d = t9x;}));  // and direct alias this isn't exactly casted tot target type.
+
+    static assert(is(Test9x : int));
+    static assert(is(Test9x : string));
+}
+
+/***************************************************/
+
+interface IntCastable
+{
+    @property int toInt();
+    alias toInt this;
+}
+
+interface StringCastable
+{
+    @property string toChars();
+    alias toChars this;
+}
+
+class Test10: IntCastable, StringCastable
+{
+    override @property int toInt()
+    {
+        return 42;
+    }
+
+    override @property string toChars()
+    {
+        return "boom";
+    }
+}
+
+void test10()
+{
+    Test10 t10 = new Test10();
+    int a = t10;
+    string b = t10;
+    assert(a == 42); // Base classes and interfaces "alias this"-es also can be used for casting
+    assert(b == "boom");
+}
+
+/***************************************************/
+
+struct Additive
+{
+    int a;
+    int opBinary(string op)(Additive rvl) if(op == "+")
+    {
+        return a + rvl.a;
+    }
+}
+
+struct Test11a
+{
+    int a;
+    Additive c;
+
+    alias a this;
+    alias c this;
+}
+
+struct Test11b
+{
+    int a;
+    double b;
+    Additive c;
+
+    alias a this;
+    alias b this;
+    alias c this;
+}
+
+void test11()
+{
+    Test11a a;
+    Test11b b;
+    static assert(!__traits(compiles, (){auto x = a + b;}));   // conflict:
+                                                               //   a.a + a.a
+                                                               //   a.a + a.b
+                                                               //   a.c + a.c
+}
+
+/***************************************************/
+
+struct Test12a
+{
+    int a;
+    alias a this;
+
+    int opBinary(string op)(int rvl) if(op == "+")
+    {
+        return 1;
+    }
+
+    int opBinary(string op)(Test12b rvl) if(op == "+")
+    {
+        return 2;
+    }
+}
+
+struct Test12b
+{
+    int a;
+    alias a this;
+}
+
+struct Test12
+{
+    Test12a a;
+    Test12b b;
+
+    alias a this;
+    alias b this;
+}
+
+void test12()
+{
+    Test12 a;
+    Test12 b;
+    auto x = a + b;
+    assert(x == 2);
+}
+
+/***************************************************/
+
+struct Test13a
+{
+    int opBinary(string op)(Test13 rvl) if(op == "+")
+    {
+        return 1;
+    }
+}
+
+struct Test13b
+{
+    int opBinaryRight(string op)(Test13 rvl) if(op == "+")
+    {
+        return 2;
+    }
+}
+
+struct Test13
+{
+    Test13a a;
+    Test13b b;
+
+    alias a this;
+    alias b this;
+}
+
+void test13()
+{
+    Test13 a;
+    Test13 b;
+    static assert(!__traits(compiles, (){auto x = a + b;}));   // conflict:
+                                                               //   a.a + a
+                                                               //   a + a.b
+}
+
+/***************************************************/
+
+struct Test14a
+{
+    int foo = 1;
+    int bar = 2;
+}
+
+struct Test14b
+{
+    int bar = 3;
+    int goo = 4;
+}
+
+struct Test14
+{
+    Test14a a;
+    Test14b b;
+
+    alias a this;
+    alias b this;
+}
+
+void test14()
+{
+    Test14 a;
+    assert(a.foo == 1);
+    assert(a.goo == 4);
+    static assert(!__traits(compiles, (){a.bar;}));   // conflict:
+                                                      //   a.a.bar
+                                                      //   a.b.bar
+}
+
+/***************************************************/
+
+struct Test15a
+{
+    int foo = 1;
+    int bar = 2;
+}
+
+struct Test15b
+{
+    int bar = 3;
+    int goo = 4;
+}
+
+struct Test15c
+{
+    Test15a a;
+    Test15b b;
+
+    alias a this;
+    alias b this;
+}
+
+struct Test15
+{
+    Test15c a;
+    Test15a b;
+
+    alias a this;
+    alias b this;
+}
+
+void test15()
+{
+    Test15 a;
+    assert(a.foo == 1);
+    assert(a.bar == 2);
+    assert(a.goo == 4);
+
+    with(a)
+    {
+        assert(foo == 1);
+        assert(bar == 2);
+        assert(goo == 4);
+    }
+}
+
+struct Test16
+{
+    int i;
+    short s;
+    alias i this;
+    alias s this;
+}
+
+void test16()
+{
+    Test16 s;
+    s.i = 1;
+    s.s = 2;
+    static assert(!__traits(compiles, (){int a = s;}));   // conflict: s.s vs s.i
+    short b = s;                                          // OK: only s.s comes into question
+    assert(b == 2);
+}
+
 int main()
 {
     test1();
@@ -1857,6 +2199,15 @@ int main()
     test11800();
     test13490();
     test11355();
+    test8();
+    test9();
+    test10();
+    test11();
+    test12();
+    test13();
+    test14();
+    test15();
+    test16();
 
     printf("Success\n");
     return 0;

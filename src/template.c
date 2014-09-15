@@ -1095,6 +1095,27 @@ public:
     }
 };
 
+static bool atCheckErrors(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    Type *prmtype = (Type *)ctx;
+    unsigned oldatt = prmtype->att;
+    prmtype->att |= RECtracing;
+    MATCH m = e->type->implicitConvTo(prmtype);
+    prmtype->att = oldatt;
+
+    if (m == MATCHexact)
+    {
+        *outexpr = e;
+        return true;
+    }
+    else if(m != MATCHnomatch)
+    {
+        *outexpr = e;
+        return false;
+    }
+    return false;
+}
+
 /*************************************************
  * Match function arguments against a specific template function.
  * Input:
@@ -1693,18 +1714,19 @@ Lretry:
 
             if (m == MATCHnomatch)
             {
-                AggregateDeclaration *ad = isAggregate(farg->type);
-                if (ad && ad->aliasthis)
+                if (AggregateDeclaration *ad = isAggregate(farg->type))
                 {
-                    /* If a semantic error occurs while doing alias this,
-                     * eg purity(bug 7295), just regard it as not a match.
-                     */
-                    unsigned olderrors = global.startGagging();
-                    Expression *e = resolveAliasThis(sc, farg);
-                    if (!global.endGagging(olderrors))
+                    Expressions results;
+                    iterateAliasThis(sc, farg, &atCheckErrors, prmtype, &results, true);
+
+                    if (results.dim == 1)
                     {
-                        farg = e;
+                        farg = results[0];
                         goto Lretry;
+                    }
+                    else if (results.dim > 1)
+                    {
+                        goto Lnomatch;
                     }
                 }
             }
@@ -2313,7 +2335,7 @@ void functionResolve(Match *m, Dsymbol *dstart, Loc loc, Scope *sc,
             return 0;
 
         if (!sc)
-            sc = td->scope; // workaround for Type::aliasthisOf
+            sc = td->scope; // workaround for aliasThisOf
 
         if (td->semanticRun == PASSinit && td->scope)
         {
@@ -3449,24 +3471,22 @@ MATCH deduceType(RootObject *o, Scope *sc, Type *tparam, TemplateParameters *par
                 MATCH m = t->implicitConvTo(tparam);
                 if (m == MATCHnomatch)
                 {
-                    if (t->ty == Tclass)
+                    if (!(tparam->att & RECtracingDT))
                     {
-                        TypeClass *tc = (TypeClass *)t;
-                        if (tc->sym->aliasthis && !(tc->att & RECtracingDT))
+                        //do not call deduceType (with alias this) recursively.
+                        Types basetypes;
+                        getAliasThisTypes(t, &basetypes);
+
+                        for (int i = 0; i < basetypes.dim; i++)
                         {
-                            tc->att = (AliasThisRec)(tc->att | RECtracingDT);
-                            m = deduceType(t->aliasthisOf(), sc, tparam, parameters, dedtypes, wm);
-                            tc->att = (AliasThisRec)(tc->att & ~RECtracingDT);
-                        }
-                    }
-                    else if (t->ty == Tstruct)
-                    {
-                        TypeStruct *ts = (TypeStruct *)t;
-                        if (ts->sym->aliasthis && !(ts->att & RECtracingDT))
-                        {
-                            ts->att = (AliasThisRec)(ts->att | RECtracingDT);
-                            m = deduceType(t->aliasthisOf(), sc, tparam, parameters, dedtypes, wm);
-                            ts->att = (AliasThisRec)(ts->att & ~RECtracingDT);
+                            unsigned oldatt = tparam->att;
+                            tparam->att |= RECtracingDT;
+                            m = deduceType(basetypes[i], sc, tparam, parameters, dedtypes, wm);
+                            tparam->att = oldatt;
+                            if (m != MATCHnomatch)
+                            {
+                                break;
+                            }
                         }
                     }
                 }

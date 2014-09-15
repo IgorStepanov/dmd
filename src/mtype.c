@@ -360,8 +360,7 @@ Type *Type::nullAttributes()
     t->swcto = NULL;
     t->vtinfo = NULL;
     t->ctype = NULL;
-    if (t->ty == Tstruct) ((TypeStruct *)t)->att = RECfwdref;
-    if (t->ty == Tclass) ((TypeClass *)t)->att = RECfwdref;
+    t->att = RECinit;
     return t;
 }
 
@@ -1235,90 +1234,6 @@ Type *Type::sarrayOf(dinteger_t dim)
     t = t->merge();
 
     return t;
-}
-
-Type *Type::aliasthisOf()
-{
-    AggregateDeclaration *ad = isAggregate(this);
-    if (ad && ad->aliasthis)
-    {
-        Dsymbol *s = ad->aliasthis;
-        if (s->isAliasDeclaration())
-            s = s->toAlias();
-        Declaration *d = s->isDeclaration();
-        if (d && !d->isTupleDeclaration())
-        {
-            assert(d->type);
-            Type *t = d->type;
-            if (d->isVarDeclaration() && d->needThis())
-            {
-                t = t->addMod(this->mod);
-            }
-            else if (d->isFuncDeclaration())
-            {
-                FuncDeclaration *fd = resolveFuncCall(Loc(), NULL, d, NULL, this, NULL, 1);
-                if (fd && fd->errors)
-                    return Type::terror;
-                if (fd && !fd->type->nextOf() && !fd->functionSemantic())
-                    fd = NULL;
-                if (fd)
-                {
-                    t = fd->type->nextOf();
-                    if (!t) // issue 14185
-                        return Type::terror;
-                    t = t->substWildTo(mod == 0 ? MODmutable : mod);
-                }
-                else
-                    return Type::terror;
-            }
-            return t;
-        }
-        EnumDeclaration *ed = s->isEnumDeclaration();
-        if (ed)
-        {
-            Type *t = ed->type;
-            return t;
-        }
-        TemplateDeclaration *td = s->isTemplateDeclaration();
-        if (td)
-        {
-            assert(td->scope);
-            FuncDeclaration *fd = resolveFuncCall(Loc(), NULL, td, NULL, this, NULL, 1);
-            if (fd && fd->errors)
-                return Type::terror;
-            if (fd && fd->functionSemantic())
-            {
-                Type *t = fd->type->nextOf();
-                t = t->substWildTo(mod == 0 ? MODmutable : mod);
-                return t;
-            }
-            else
-                return Type::terror;
-        }
-        //printf("%s\n", s->kind());
-    }
-    return NULL;
-}
-
-bool Type::checkAliasThisRec()
-{
-    Type *tb = toBasetype();
-    AliasThisRec* pflag;
-    if (tb->ty == Tstruct)
-        pflag = &((TypeStruct *)tb)->att;
-    else if (tb->ty == Tclass)
-        pflag = &((TypeClass *)tb)->att;
-    else
-        return false;
-
-    AliasThisRec flag = (AliasThisRec)(*pflag & RECtypeMask);
-    if (flag == RECfwdref)
-    {
-        Type *att = aliasthisOf();
-        flag = att && att->implicitConvTo(this) ? RECyes : RECno;
-    }
-    *pflag = (AliasThisRec)(flag | (*pflag & ~RECtypeMask));
-    return flag == RECyes;
 }
 
 Dsymbol *Type::toDsymbol(Scope *sc)
@@ -2216,6 +2131,35 @@ structalign_t Type::alignment()
     return STRUCTALIGN_DEFAULT;
 }
 
+struct FindDotIdCtx
+{
+    Identifier *ident;
+    int flag;
+};
+
+static bool atFindDotId(Scope *sc, Expression *e, void *ctx_, Expression **outexpr)
+{
+    FindDotIdCtx *ctx = (FindDotIdCtx*)ctx_;
+    /* Rewrite e.ident as:
+     *  e.aliasthis.ident
+     */
+    DotIdExp *die = new DotIdExp(e->loc, e, ctx->ident);
+    unsigned errors = global.startGagging();
+    bool err = false;
+    unsigned att1 = e->type->att;
+    e->type->att |= RECtracing;
+    Expression* eret = die->semanticY(sc, ctx->flag);
+    e->type->att = att1;
+    if (eret && eret->op == TOKerror)
+        err = true;
+    if (!global.endGagging(errors) && !err && eret)
+    {
+        *outexpr = eret;
+        return true;
+    }
+    return false;
+}
+
 /***************************************
  * Figures out what to do with an undefined member reference
  * for classes and structs.
@@ -2281,15 +2225,27 @@ Expression *Type::noMember(Scope *sc, Expression *e, Identifier *ident, int flag
             return e;
         }
 
-        /* See if we should forward to the alias this.
-         */
-        if (sym->aliasthis)
-        {   /* Rewrite e.ident as:
-             *  e.aliasthis.ident
-             */
-            e = resolveAliasThis(sc, e);
-            DotIdExp *die = new DotIdExp(e->loc, e, ident);
-            return die->semanticY(sc, flag);
+        if (!(att & RECtracing))
+        {
+            /* See if we should forward to the alias this.
+            */
+            FindDotIdCtx ctx = {ident, flag};
+            Expressions results;
+            iterateAliasThis(sc, e, &atFindDotId, &ctx, &results);
+
+            if (results.dim == 1)
+            {
+                return results[0];
+            }
+            else if (results.dim > 1)
+            {
+                e->error("There are many candidates to %s.%s resolve:", e->toChars(), ident->toChars());
+                for (int j = 0; j < results.dim; ++j)
+                {
+                    e->error("%s", results[j]->toChars());
+                }
+                return new ErrorExp();
+            }
         }
     }
 
@@ -5951,14 +5907,61 @@ MATCH TypeFunction::callMatch(Type *tthis, Expressions *args, int flag)
                     goto Nomatch;
             }
 
-            /* find most derived alias this type being matched.
-             */
-            while (1)
+            if (targb->ty == Tclass || targb->ty == Tstruct)
             {
-                Type *tat = ta->toBasetype()->aliasthisOf();
-                if (!tat || !tat->implicitConvTo(tprm))
-                    break;
-                ta = tat;
+                if (targb->ty == Tclass || targb->ty == Tstruct)
+                {
+                    Types basetypes;
+                    Types results_exact;
+                    Types results_convert;
+                    getAliasThisTypes(arg->type, &basetypes);
+
+                    for (int i = 0; i < basetypes.dim; i++)
+                    {
+                        unsigned oldatt = basetypes[i]->att;
+                        basetypes[i]->att |= RECtracing;
+                        MATCH mx = basetypes[i]->implicitConvTo(tprm);
+                        basetypes[i]->att = oldatt;
+                        if (mx == MATCHexact)
+                        {
+                            results_exact.push(basetypes[i]);
+                        }
+                        else if(mx != MATCHnomatch)
+                        {
+                            results_convert.push(basetypes[i]);
+                        }
+                    }
+
+                    if (results_exact.dim == 1)
+                    {
+                        targb = results_exact[0];
+                    }
+                    else if (results_exact.dim > 1)
+                    {
+                        arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
+                        for (int j = 0; j < results_exact.dim; ++j)
+                        {
+                            arg->error("%s", results_exact[j]->toChars());
+                        }
+                        goto Nomatch;
+                    }
+                    else
+                    {
+                        if (results_convert.dim == 1)
+                        {
+                            targb = results_convert[0];
+                        }
+                        else if (results_convert.dim > 1)
+                        {
+                            arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
+                            for (int j = 0; j < results_convert.dim; ++j)
+                            {
+                                arg->error("%s", results_convert[j]->toChars());
+                            }
+                            goto Nomatch;
+                        }
+                    }
+                }
             }
 
             /* A ref variable should work like a head-const reference.
@@ -7511,7 +7514,7 @@ TypeStruct::TypeStruct(StructDeclaration *sym)
         : Type(Tstruct)
 {
     this->sym = sym;
-    this->att = RECfwdref;
+    this->att = RECinit;
 }
 
 const char *TypeStruct::kind()
@@ -8014,11 +8017,23 @@ MATCH TypeStruct::implicitConvTo(Type *to)
             }
         }
     }
-    else if (sym->aliasthis && !(att & RECtracing))
+    else if (!(att & RECtracing))
     {
-        att = (AliasThisRec)(att | RECtracing);
-        m = aliasthisOf()->implicitConvTo(to);
-        att = (AliasThisRec)(att & ~RECtracing);
+        Types candidates;
+        getAliasThisTypes(this, &candidates);
+
+        m = MATCHnomatch;
+        for (int i = 0; i < candidates.dim; i++)
+        {
+            unsigned tatt = candidates[i]->att;
+            candidates[i]->att |= RECtracing;
+            MATCH m2 = candidates[i]->implicitConvTo(to);
+            candidates[i]->att = tatt;
+            if (m2 > m)
+            {
+                m = m2;
+            }
+        }
     }
     else
         m = MATCHnomatch;       // no match
@@ -8042,13 +8057,20 @@ unsigned char TypeStruct::deduceWild(Type *t, bool isRef)
 
     unsigned char wm = 0;
 
-    if (t->hasWild() && sym->aliasthis && !(att & RECtracing))
+    if (t->hasWild() && !(att & RECtracing))
     {
-        att = (AliasThisRec)(att | RECtracing);
-        wm = aliasthisOf()->deduceWild(t, isRef);
-        att = (AliasThisRec)(att & ~RECtracing);
-    }
+        Types candidates;
+        getAliasThisTypes(this, &candidates);
 
+        for (int i = 0; i < candidates.dim; i++)
+        {
+            unsigned tatt = candidates[i]->att;
+            candidates[i]->att |= RECtracing;
+            wm = candidates[i]->deduceWild(t, isRef);
+            candidates[i]->att = tatt;
+            break;
+        }
+    }
     return wm;
 }
 
@@ -8064,7 +8086,7 @@ TypeClass::TypeClass(ClassDeclaration *sym)
         : Type(Tclass)
 {
     this->sym = sym;
-    this->att = RECfwdref;
+    this->att = RECinit;
 }
 
 const char *TypeClass::kind()
@@ -8548,13 +8570,25 @@ MATCH TypeClass::implicitConvTo(Type *to)
     }
 
     m = MATCHnomatch;
-    if (sym->aliasthis && !(att & RECtracing))
-    {
-        att = (AliasThisRec)(att | RECtracing);
-        m = aliasthisOf()->implicitConvTo(to);
-        att = (AliasThisRec)(att & ~RECtracing);
-    }
 
+    if (!(att & RECtracing))
+    {
+        Types candidates;
+        getAliasThisTypes(this, &candidates);
+
+        m = MATCHnomatch;
+        for (int i = 0; i < candidates.dim; i++)
+        {
+            unsigned tatt = candidates[i]->att;
+            candidates[i]->att |= RECtracing;
+            MATCH m2 = candidates[i]->implicitConvTo(to);
+            candidates[i]->att = tatt;
+            if (m2 > m)
+            {
+                m = m2;
+            }
+        }
+    }
     return m;
 }
 
@@ -8590,11 +8624,19 @@ unsigned char TypeClass::deduceWild(Type *t, bool isRef)
 
     unsigned char wm = 0;
 
-    if (t->hasWild() && sym->aliasthis && !(att & RECtracing))
+    if (t->hasWild() && !(att & RECtracing))
     {
-        att = (AliasThisRec)(att | RECtracing);
-        wm = aliasthisOf()->deduceWild(t, isRef);
-        att = (AliasThisRec)(att & ~RECtracing);
+        Types candidates;
+        getAliasThisTypes(this, &candidates);
+
+        for (int i = 0; i < candidates.dim; i++)
+        {
+            unsigned tatt = candidates[i]->att;
+            candidates[i]->att |= RECtracing;
+            wm = candidates[i]->deduceWild(t, isRef);
+            candidates[i]->att = tatt;
+            break;
+        }
     }
 
     return wm;

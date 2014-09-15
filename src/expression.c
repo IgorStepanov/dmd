@@ -52,6 +52,55 @@ Type *getTypeInfoType(Type *t, Scope *sc);
 
 #define LOGSEMANTIC     0
 
+bool atFindOpUna(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    UnaExp *e1 = (UnaExp*)ctx;
+    e1 = (UnaExp *)e1->copy();
+    e1->att1 = true;
+    e1->e1 = e; //replace op(e1) with op(e1.%aliasthis%)
+    Expression *e2 = e1->trySemantic(sc);
+    if (e2)
+    {
+        *outexpr = e2;
+        return true;
+    }
+    return false;
+}
+
+bool atFindOpUnaBin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    BinExp *e1 = (BinExp*)ctx;
+    e1 = (BinExp *)e1->copy();
+    UnaExp *ae1 = (UnaExp *)e1->e1;
+    ae1 = (UnaExp *)ae1->copy();
+
+    ae1->e1 = e; //replace bin(una(e1), ...) with bin(una(e1.%aliasthis%), ...)
+    e1->e1 = ae1;
+    ae1->att1 = true;
+    Expression *e2 = e1->trySemantic(sc);
+    if (e2)
+    {
+        *outexpr = e2;
+        return true;
+    }
+    return false;
+}
+
+bool atFindOpExp2Bin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    BinExp *e1 = (BinExp*)ctx;
+    e1 = (BinExp *)e1->copy();
+    e1->e2 = e; //replace bin(..., e2) with bin(..., e2.%aliasthis%)
+
+    Expression *e2 = e1->trySemantic(sc);
+    if (e2)
+    {
+        *outexpr = e2;
+        return true;
+    }
+    return false;
+}
+
 /*************************************************************
  * Given var, we need to get the
  * right 'this' pointer if var is in an outer class, but our
@@ -1007,79 +1056,6 @@ void expandTuples(Expressions *exps)
             }
         }
     }
-}
-
-/****************************************
- * Expand alias this tuples.
- */
-
-TupleDeclaration *isAliasThisTuple(Expression *e)
-{
-    if (!e->type)
-        return NULL;
-
-    Type *t = e->type->toBasetype();
-Lagain:
-    if (Dsymbol *s = t->toDsymbol(NULL))
-    {
-        AggregateDeclaration *ad = s->isAggregateDeclaration();
-        if (ad)
-        {
-            s = ad->aliasthis;
-            if (s && s->isVarDeclaration())
-            {
-                TupleDeclaration *td = s->isVarDeclaration()->toAlias()->isTupleDeclaration();
-                if (td && td->isexp)
-                    return td;
-            }
-            if (Type *att = t->aliasthisOf())
-            {
-                t = att;
-                goto Lagain;
-            }
-        }
-    }
-    return NULL;
-}
-
-int expandAliasThisTuples(Expressions *exps, size_t starti)
-{
-    if (!exps || exps->dim == 0)
-        return -1;
-
-    for (size_t u = starti; u < exps->dim; u++)
-    {
-        Expression *exp = (*exps)[u];
-        TupleDeclaration *td = isAliasThisTuple(exp);
-        if (td)
-        {
-            exps->remove(u);
-            for (size_t i = 0; i<td->objects->dim; ++i)
-            {
-                Expression *e = isExpression((*td->objects)[i]);
-                assert(e);
-                assert(e->op == TOKdsymbol);
-                DsymbolExp *se = (DsymbolExp *)e;
-                Declaration *d = se->s->isDeclaration();
-                assert(d);
-                e = new DotVarExp(exp->loc, exp, d);
-                assert(d->type);
-                e->type = d->type;
-                exps->insert(u + i, e);
-            }
-    #if 0
-            printf("expansion ->\n");
-            for (size_t i = 0; i<exps->dim; ++i)
-            {
-                Expression *e = (*exps)[i];
-                printf("\texps[%d] e = %s %s\n", i, Token::tochars[e->op], e->toChars());
-            }
-    #endif
-            return (int)u;
-        }
-    }
-
-    return -1;
 }
 
 /****************************************
@@ -2638,6 +2614,25 @@ bool Expression::checkNogc(Scope *sc, FuncDeclaration *f)
     return false;
 }
 
+static bool atCheckBoolean(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    unsigned errors = global.startGagging();
+    bool err = false;
+    Type *etb = e->type->toBasetype();
+    unsigned oatt = etb->att;
+    etb->att |= RECtracing;
+    Expression* eret = e->checkToBoolean(sc);
+    etb->att = oatt;
+    if (eret && eret->op == TOKerror)
+        err = true;
+    if (!global.endGagging(errors) && !err)
+    {
+        *outexpr = eret;
+        return true;
+    }
+    return false;
+}
+
 /********************************************
  * Check that the postblit is callable if t is an array of structs.
  * Returns true if error happens.
@@ -2742,7 +2737,6 @@ Expression *Expression::toBoolean(Scope *sc)
     Expression *e = this;
     Type *t = type;
     Type *tb = type->toBasetype();
-    Type *att = NULL;
 Lagain:
     // Structs can be converted to bool using opCast(bool)()
     if (tb->ty == Tstruct)
@@ -2760,14 +2754,27 @@ Lagain:
         }
 
         // Forward to aliasthis.
-        if (ad->aliasthis && tb != att)
+        if (!(tb->att & RECtracing))
         {
-            if (!att && tb->checkAliasThisRec())
-                att = tb;
-            e = resolveAliasThis(sc, e);
-            t = e->type;
-            tb = e->type->toBasetype();
-            goto Lagain;
+            Expressions results;
+            iterateAliasThis(sc, e, &atCheckBoolean, NULL, &results);
+
+            if (results.dim == 1)
+            {
+                e = results[0];
+                t = e->type;
+                tb = e->type->toBasetype();
+                goto Lagain;
+            }
+            else if (results.dim > 1)
+            {
+                e->error("Unable to represent %s as bool. Candidates:", e->toChars());
+                for (int j = 0; j < results.dim; ++j)
+                {
+                    e->error("%s", results[j]->toChars());
+                }
+                return new ErrorExp();
+            }
         }
     }
 
@@ -3163,6 +3170,19 @@ IdentifierExp *IdentifierExp::create(Loc loc, Identifier *ident)
     return new IdentifierExp(loc, ident);
 }
 
+static bool atFindMember(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    Identifier *ident = (Identifier*)ctx;
+    Expression *e1 = new DotIdExp(e->loc, e, ident);
+    e1 = e1->trySemantic(sc);
+    if (e1)
+    {
+        *outexpr = e1;
+        return true;
+    }
+    return false;
+}
+
 Expression *IdentifierExp::semantic(Scope *sc)
 {
 #if LOGSEMANTIC
@@ -3257,15 +3277,27 @@ Expression *IdentifierExp::semantic(Scope *sc)
     if (hasThis(sc))
     {
         AggregateDeclaration *ad = sc->getStructClassScope();
-        if (ad && ad->aliasthis)
+        if (ad)
         {
-            Expression *e;
-            e = new IdentifierExp(loc, Id::This);
-            e = new DotIdExp(loc, e, ad->aliasthis->ident);
-            e = new DotIdExp(loc, e, ident);
-            e = e->trySemantic(sc);
-            if (e)
-                return e;
+            Expression *e = new IdentifierExp(loc, Id::This);
+            e = e->semantic(sc);
+
+            Expressions results;
+            iterateAliasThis(sc, e, &atFindMember, ident, &results);
+
+            if (results.dim == 1)
+            {
+                return results[0];
+            }
+            else if (results.dim > 1)
+            {
+                error("Unable to unambiguously resolve %s.%s Candidates:", e->toChars(), ident->toChars());
+                for (int j = 0; j < results.dim; ++j)
+                {
+                    error("%s", results[j]->toChars());
+                }
+                return new ErrorExp();
+            }
         }
     }
 
@@ -6505,7 +6537,7 @@ UnaExp::UnaExp(Loc loc, TOK op, int size, Expression *e1)
         : Expression(loc, op, size)
 {
     this->e1 = e1;
-    this->att1 = NULL;
+    this->att1 = false;
 }
 
 Expression *UnaExp::syntaxCopy()
@@ -6546,8 +6578,7 @@ BinExp::BinExp(Loc loc, TOK op, int size, Expression *e1, Expression *e2)
     this->e1 = e1;
     this->e2 = e2;
 
-    this->att1 = NULL;
-    this->att2 = NULL;
+    this->att1 = false;
 }
 
 Expression *BinExp::syntaxCopy()
@@ -8476,12 +8507,25 @@ Lagain:
 
             if (e1->op != TOKtype)
             {
-                if (sd->aliasthis && e1->type != att1)
+                if (!att1) //we don't need the recursion. On recursion done in iterateAliasThis
                 {
-                    if (!att1 && e1->type->checkAliasThisRec())
-                        att1 = e1->type;
-                    e1 = resolveAliasThis(sc, e1);
-                    goto Lagain;
+                    att1 = true;
+                    Expressions results;
+                    iterateAliasThis(sc, e1, &atFindOpUna, this, &results);
+
+                    if (results.dim == 1)
+                    {
+                        return results[0];
+                    }
+                    else if (results.dim > 1)
+                    {
+                        error("Unable to unambiguously resolve %s Candidates:", toChars());
+                        for (int j = 0; j < results.dim; ++j)
+                        {
+                            error("%s", results[j]->toChars());
+                        }
+                        return new ErrorExp();
+                    }
                 }
                 error("%s %s does not overload ()", sd->kind(), sd->toChars());
                 return new ErrorExp();
@@ -9968,12 +10012,24 @@ Lagain:
             e = e->semantic(sc);
             return Expression::combine(e0, e);
         }
-        if (ad->aliasthis && e1->type != att1)
+        if (!att1)
         {
-            if (!att1 && e1->type->checkAliasThisRec())
-                att1 = e1->type;
-            e1 = resolveAliasThis(sc, e1);
-            goto Lagain;
+            Expressions results;
+            iterateAliasThis(sc, e1, &atFindOpUna, this, &results);
+
+            if (results.dim == 1)
+            {
+                return results[0];
+            }
+            else if (results.dim > 1)
+            {
+                error("Unable to unambiguously resolve %s. Candidates:", toChars());
+                for (int j = 0; j < results.dim; ++j)
+                {
+                    error("%s", results[j]->toChars());
+                }
+                return new ErrorExp();
+            }
         }
         goto Lerror;
     }
@@ -10995,17 +11051,24 @@ Expression *AssignExp::semantic(Scope *sc)
             }
 
             // No opIndexAssign found yet, but there might be an alias this to try.
-            if (ad->aliasthis && t1 != ae->att1)
+            if (!ae->att1)
             {
-                ArrayExp *aex = (ArrayExp *)ae->copy();
-                if (!aex->att1 && t1->checkAliasThisRec())
-                    aex->att1 = t1;
-                aex->e1 = new DotIdExp(loc, ae->e1, ad->aliasthis->ident);
-                this->e1 = aex;
-                Expression *ex = this->trySemantic(sc);
-                if (ex)
-                    return ex;
-                this->e1 = ae;  // restore
+                Expressions results;
+                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, this, &results);
+
+                if (results.dim == 1)
+                {
+                    return results[0];
+                }
+                else if (results.dim > 1)
+                {
+                    error("Unable to unambiguously resolve %s. Candidates:", toChars());
+                    for (int j = 0; j < results.dim; ++j)
+                    {
+                        error("%s", results[j]->toChars());
+                    }
+                    return new ErrorExp();
+                }
             }
 
         Lfallback:
@@ -11064,17 +11127,24 @@ Expression *AssignExp::semantic(Scope *sc)
             }
 
             // No opSliceAssign found yet, but there might be an alias this to try.
-            if (ad->aliasthis && t1 != ae->att1)
+            if (!ae->att1)
             {
-                SliceExp *aex = (SliceExp *)ae->copy();
-                if (!aex->att1 && t1->checkAliasThisRec())
-                    aex->att1 = t1;
-                aex->e1 = new DotIdExp(loc, ae->e1, ad->aliasthis->ident);
-                this->e1 = aex;
-                Expression *ex = this->trySemantic(sc);
-                if (ex)
-                    return ex;
-                this->e1 = ae;  // restore
+                Expressions results;
+                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, this, &results);
+
+                if (results.dim == 1)
+                {
+                    return results[0];
+                }
+                else if (results.dim > 1)
+                {
+                    error("Unable to unambiguously resolve %s. Candidates:", toChars());
+                    for (int j = 0; j < results.dim; ++j)
+                    {
+                        error("%s", results[j]->toChars());
+                    }
+                    return new ErrorExp();
+                }
             }
         }
     }
@@ -11407,16 +11477,24 @@ Expression *AssignExp::semantic(Scope *sc)
             else    // Bugzilla 11355
             {
                 AggregateDeclaration *ad2 = isAggregate(e2x->type);
-                if (ad2 && ad2->aliasthis && !(att2 && e2x->type == att2))
+                if (ad2 && !att1)
                 {
-                    if (!att2 && e2->type->checkAliasThisRec())
-                        att2 = e2->type;
+                    Expressions results;
+                    iterateAliasThis(sc, e2, &atFindOpUna2Bin, this, &results);
 
-                    /* Rewrite (e1 op e2) as:
-                     *      (e1 op e2.aliasthis)
-                     */
-                    e2 = new DotIdExp(e2->loc, e2, ad2->aliasthis->ident);
-                    return semantic(sc);
+                    if (results.dim == 1)
+                    {
+                        return results[0];
+                    }
+                    else if (results.dim > 1)
+                    {
+                        error("Unable to unambiguously resolve %s. Candidates:", toChars());
+                        for (int j = 0; j < results.dim; ++j)
+                        {
+                            error("%s", results[j]->toChars());
+                        }
+                        return new ErrorExp();
+                    }
                 }
             }
         }
