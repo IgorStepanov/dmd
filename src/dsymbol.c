@@ -1418,9 +1418,9 @@ Dsymbol *WithScopeSymbol::search(Loc loc, Identifier *ident, int flags)
     else if (candidates.dim > 1)
     {
         e->error("There are many candidates to %s.%s resolve:", e->toChars(), ident->toChars());
-        for (int j = 0; j < candidates.dim; ++j)
+        for (int j = 0; j < results.dim; ++j)
         {
-            e->error("%s", candidates[j]->toChars());
+            e->error("%s", results[j]->toChars());
         }
     }
     return NULL;

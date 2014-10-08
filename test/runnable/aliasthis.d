@@ -1819,6 +1819,8 @@ void test8()
     string b = t8;
     assert(a == 1);
     assert(b == "test");
+    assert(cast(int)t8 == 1);
+    assert(cast(string)t8 == "test");
 }
 
 /***************************************************/
@@ -1869,8 +1871,7 @@ void test9()
 
     static assert(!__traits(compiles, (){string s = t9;})); //t9.a.b vs t9.b.b conflict
 
-    int a = t9; // OK. Test9 explicitly says that it is int subtype and "c" field should be used in int casting
-    assert(a == 3);
+    static assert(!__traits(compiles, (){int a = t9;}));    //t9.a.a vs t9.b.a vs t9.c conflict
 
     static assert(!__traits(compiles, (){long b = t9;}));    // Can't be unambiguously resolved, because candidates have a different types
     static assert(!__traits(compiles, (){double d = t9;}));  // and direct alias this isn't exactly casted tot target type.
@@ -1879,13 +1880,6 @@ void test9()
     static assert(is(Test9 : string)); // Yes, Test9 is a string subtype (because Test9 is a Test9a subtype and Test9a
                                        // is a string subtype. However Test9 cannot be casted to string directly, because
                                        // there are conflict
-    Test9x t9x;
-    t9x.t = t9;
-
-    static assert(!__traits(compiles, (){string s = t9x;})); //t9x.t.a.b vs t9x.t.b.b conflict
-
-    int ax = t9x; // OK. Test9 explicitly says that it is int subtype and "t.c" field should be used in int casting
-    assert(ax == 3);
 
     static assert(!__traits(compiles, (){long b = t9x;}));    // Can't be unambiguously resolved, because candidates have a different types
     static assert(!__traits(compiles, (){double d = t9x;}));  // and direct alias this isn't exactly casted tot target type.
@@ -2008,8 +2002,8 @@ void test12()
 {
     Test12 a;
     Test12 b;
-    auto x = a + b;
-    assert(x == 2);
+
+    static assert(!__traits(compiles, (){a + b;})); // a.a.opBinary(b.a.a) or a.a.opBinary(b.b)
 }
 
 /***************************************************/
@@ -2116,14 +2110,14 @@ struct Test15
 void test15()
 {
     Test15 a;
-    assert(a.foo == 1);
-    assert(a.bar == 2);
+    static assert(!__traits(compiles, (){a.foo == 0;})); // a.a.a.foo vs a.b.foo
+    static assert(!__traits(compiles, (){a.bar == 0;})); // a.a.a.bar vs a.a.b.bar vs a.b.bar
     assert(a.goo == 4);
 
     with(a)
     {
-        assert(foo == 1);
-        assert(bar == 2);
+        static assert(!__traits(compiles, (){foo == 0;})); // a.a.a.foo vs a.b.foo
+        static assert(!__traits(compiles, (){bar == 0;})); // a.a.a.bar vs a.a.b.bar vs a.b.bar
         assert(goo == 4);
     }
 }

@@ -68,8 +68,23 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
         directtypes = new StringTable();
         directtypes->_init();
     }
+    StringValue *depth_counter = directtypes->lookup(e->type->deco, strlen(e->type->deco));
+    if (!depth_counter)
+    {
+        depth_counter = directtypes->insert(e->type->deco, strlen(e->type->deco));
+        depth_counter->ptrvalue = e;
+    }
+    else if (depth_counter->ptrvalue)
+    {
+        return false; //This type already was visited.
+    }
+    else
+    {
+        depth_counter->ptrvalue = e;
+    }
+
     bool r = false;
-    Expressions resolwedalthises;
+
     if (aliasThisSymbols)
     {
         for (int i = 0; i < aliasThisSymbols->dim; ++i)
@@ -85,46 +100,22 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
                 continue;
             assert(e1->type->deco);
 
-            StringValue *val = directtypes->lookup(e1->type->deco, strlen(e1->type->deco));
-            
-            if (val && val->ptrvalue)
-            {
-                continue;
-            }
-            else if (val)
-            {
-                val->ptrvalue = e;
-            }
-            else
-            {
-                directtypes->insert(e1->type->deco, strlen(e1->type->deco))->ptrvalue = e;
-            }
-
-            resolwedalthises.push(e1);
             Expression *e2 = NULL;
-            r = dg(sc, e1, ctx, &e2) || r;
+            int success = dg(sc, e1, ctx, &e2);
+            r = r || success;
 
             if (e2)
             {
                 ret->push(e2);
             }
+
+            if (!success)
+            {
+                r = iterateAliasThis(sc, e1, dg, ctx, ret, gagerrors, directtypes) || r;
+            }
         }
-    }
-    if (r)
-    {
-        for (int i = 0; i < resolwedalthises.dim; ++i)
-        {
-            Expression *e1 = resolwedalthises[i];
-            directtypes->update(e1->type->deco, strlen(e1->type->deco))->ptrvalue = NULL;
-        }
-        return true;
     }
 
-    for (int i = 0; i < resolwedalthises.dim; ++i)
-    {
-        Expression *e1 = resolwedalthises[i];
-        r = iterateAliasThis(sc, e1, dg, ctx, ret, gagerrors, directtypes) || r;
-    }
     if (e->type->ty == Tclass)
     {
         ClassDeclaration *cd = ((TypeClass *)e->type)->sym;
@@ -138,12 +129,7 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
         }
     }
 
-    for (int i = 0; i < resolwedalthises.dim; ++i)
-    {
-        Expression *e1 = resolwedalthises[i];
-        directtypes->update(e1->type->deco, strlen(e1->type->deco))->ptrvalue = NULL;
-    }
-    return r;
+    depth_counter->ptrvalue = NULL;
 }
 
 Type *aliasThisOf(Type *t, int idx)
@@ -383,15 +369,15 @@ int expandAliasThisTuples(Expressions *exps, size_t starti)
                 e->type = d->type;
                 exps->insert(u + i, e);
             }
-            #if 0
+    #if 0
             printf("expansion ->\n");
             for (size_t i = 0; i<exps->dim; ++i)
             {
                 Expression *e = (*exps)[i];
                 printf("\texps[%d] e = %s %s\n", i, Token::tochars[e->op], e->toChars());
-        }
-        #endif
-        return (int)u;
+            }
+    #endif
+            return (int)u;
         }
     }
 
@@ -476,36 +462,37 @@ void AliasThis::semantic(Scope *sc)
             t = t->nextOf(); //t is return value;
                              //t may be NULL, if d is a auto function
         }
+
         if (t)
         {
             /* disable the alias this conversion so the implicit conversion check
-             * doesn't use it.
-             */
-             unsigned oldatt = ad->type->att;
-             ad->type->att |= RECtracing;
-             bool match = ad->type->implicitConvTo(t) > MATCHnomatch;
-             ad->type->att = oldatt;
-             if (match)
-             {
-                 ::error(loc, "alias this is not reachable as %s already converts to %s", ad->toChars(), t->toChars());
-             }
+            * doesn't use it.
+            */
+            unsigned oldatt = ad->type->att;
+            ad->type->att |= RECtracing;
+            bool match = ad->type->implicitConvTo(t) > MATCHnomatch;
+            ad->type->att = oldatt;
+            if (match)
+            {
+                ::error(loc, "alias this is not reachable as %s already converts to %s", ad->toChars(), t->toChars());
+            }
 
-             for (int i = 0; i < ad->aliasThisSymbols->dim; ++i)
-             {
-                 Dsymbol *sx2 = (*ad->aliasThisSymbols)[i];
-                 if (sx2->isAliasDeclaration())
-                     sx2 = sx2->toAlias();
-                 Declaration *d2 = sx2->isDeclaration();
-                 if (d2 && !d2->isTupleDeclaration())
-                 {
-                     Type *t2 = d2->type;
-                     assert(t2);
-                     if (t2->equals(t))
-                     {
-                         ::error(loc, "alias %s this tries to override another alias this with type %s", ident->toChars(), t2->toChars());
-                     }
-                 }
-             }
+            for (int i = 0; i < ad->aliasThisSymbols->dim; ++i)
+            {
+                Dsymbol *sx2 = (*ad->aliasThisSymbols)[i];
+                if (sx2->isAliasDeclaration())
+                    sx2 = sx2->toAlias();
+                Declaration *d2 = sx2->isDeclaration();
+                if (d2 && !d2->isTupleDeclaration())
+                {
+                    Type *t2 = d2->type;
+                    assert(t2);
+                    if (t2->equals(t))
+                    {
+                        ::error(loc, "alias %s this tries to override another alias this with type %s", ident->toChars(), t2->toChars());
+                    }
+                }
+            }
         }
     }
 
