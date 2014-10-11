@@ -336,23 +336,6 @@ void resloveAliasThisForBinExp(Scope *sc, BinExp *be, bool check_lvl, bool check
  * Return NULL if not an operator overload.
  */
 
-//replace una(una(e1)) with una(una(e1.%aliasthis%))
-static bool atFindOpUnaUna(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
-{
-    UnaExp *ue = (UnaExp *)((UnaExp *)ctx)->copy();
-    UnaExp *ae = (UnaExp *)ue->e1;
-    ae = (UnaExp *)ae->copy();
-    ae->e1 = e;
-    ue->e1 = ae;
-    Expression *e2 = ue->trySemantic(sc);
-    if (e2)
-    {
-        *outexpr = e2;
-        return true;
-    }
-    return false;
-}
-
 Expression *op_overload(Expression *e, Scope *sc)
 {
     class OpOverload : public Visitor
@@ -422,11 +405,9 @@ Expression *op_overload(Expression *e, Scope *sc)
                          *      op(a.aliasthis[arguments])
                          */
                         Expression *e1 = ae->copy();
-                        UnaExp *ue = (UnaExp *)e->copy();
-                        ue->att1 = true;
 
                         Expressions results;
-                        iterateAliasThis(sc, ae->e1, &atFindOpUnaUna, ue, &results);
+                        iterateAliasThis(sc, ae->e1, &atFindOpUnaUna, e, &results);
                         if (results.dim == 1)
                         {
                             result = results[0];
@@ -591,11 +572,9 @@ Expression *op_overload(Expression *e, Scope *sc)
                     /* Rewrite op(e1) as:
                      *  op(e1.aliasthis)
                      */
-                    UnaExp *ue = (UnaExp *)e->copy();
-                    ue->att1 = true;
 
                     Expressions results;
-                    iterateAliasThis(sc, e->e1, &atFindOpUna, ue, &results);
+                    iterateAliasThis(sc, e->e1, &atFindOpUna, e, &results);
                     if (results.dim == 1)
                     {
                         result = results[0];
@@ -681,11 +660,9 @@ Expression *op_overload(Expression *e, Scope *sc)
                     /* Rewrite op(e1) as:
                      *  op(e1.aliasthis)
                      */
-                    UnaExp *ue = (UnaExp *)ae->copy();
-                    ue->att1 = true;
 
                     Expressions results;
-                    iterateAliasThis(sc, ae->e1, &atFindOpUna, ue, &results);
+                    iterateAliasThis(sc, ae->e1, &atFindOpUna, ae, &results);
                     if (results.dim == 1)
                     {
                         result = results[0];
@@ -744,11 +721,9 @@ Expression *op_overload(Expression *e, Scope *sc)
                     /* Rewrite op(e1) as:
                      *  op(e1.aliasthis)
                      */
-                    CastExp *ce = (CastExp *)e->copy();
-                    ce->att1 = true;
 
                     Expressions results;
-                    iterateAliasThis(sc, e->e1, &atFindOpUna, ce, &results);
+                    iterateAliasThis(sc, e->e1, &atFindOpUna, e, &results);
 
                     if (results.dim == 1)
                     {
@@ -1193,11 +1168,8 @@ Expression *op_overload(Expression *e, Scope *sc)
                     // Didn't find it. Forward to aliasthis
                     if (!e->att1)
                     {
-                        BinExp *be = (BinExp *)e->copy();
-                        be->att1 = true;
-
                         Expressions results;
-                        iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, be, &results);
+                        iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, e, &results);
 
                         if (results.dim == 1)
                         {
@@ -1285,11 +1257,8 @@ Expression *op_overload(Expression *e, Scope *sc)
                     // Didn't find it. Forward to aliasthis
                     if (!e->att1)
                     {
-                        BinExp *be = (BinExp *)e->copy();
-                        be->att1 = true;
-
                         Expressions results;
-                        iterateAliasThis(sc, se->e1, &atFindOpUnaBin, be, &results);
+                        iterateAliasThis(sc, se->e1, &atFindOpUnaBin, e, &results);
 
                         if (results.dim == 1)
                         {

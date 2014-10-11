@@ -105,6 +105,9 @@ Type *getIndirection(Type *t);
 bool atFindOpUna(Scope *sc, Expression *e, void *ctx, Expression **outexpr);
 //replace bin(una(e1), e2) with bin(una(e1.%aliasthis%), e2)
 bool atFindOpUnaBin(Scope *sc, Expression *e, void *ctx, Expression **outexpr);
+//replace una(una(e1)) with una(una(e1.%aliasthis%))
+bool atFindOpUnaUna(Scope *sc, Expression *e, void *ctx, Expression **outexpr);
+
 Expression *checkGC(Scope *sc, Expression *e);
 
 bool checkEscape(Scope *sc, Expression *e, bool gag);

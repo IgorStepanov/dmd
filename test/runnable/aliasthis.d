@@ -2122,6 +2122,8 @@ void test15()
     }
 }
 
+/***************************************************/
+
 struct Test16
 {
     int i;
@@ -2139,6 +2141,129 @@ void test16()
     short b = s;                                          // OK: only s.s comes into question
     assert(b == 2);
 }
+
+/***************************************************/
+
+struct Test17a
+{
+    char foo(int)
+    {
+        return 'I';
+    }
+
+    double foo(double)
+    {
+        return 'D';
+    }
+}
+
+struct Test17b
+{
+    char foo(string)
+    {
+        return 'S';
+    }
+}
+
+struct Test17
+{
+    Test17a a;
+    Test17b b;
+    alias a this;
+    alias b this;
+}
+
+void test17()
+{
+    Test17 s;
+    assert(s.foo(1) == 'I');
+    assert(s.foo(1.0) == 'D');
+    assert(s.foo("string") == 'S');
+}
+
+/***************************************************/
+
+struct Test18a
+{
+    char foo(int)
+    {
+        return 'I';
+    }
+}
+
+struct Test18b
+{
+    char foo(string)
+    {
+        return 'S';
+    }
+
+    double foo(double)
+    {
+        return 'D';
+    }
+}
+
+struct Test18
+{
+    Test18a a;
+    Test18b b;
+    alias a this;
+    alias b this;
+}
+
+void test18()
+{
+    Test18 s;
+    static assert(!__traits(compiles, (){s.foo(1);}));   // conflict: s.a.foo(int) vs s.b.foo(double)
+    assert(s.foo(1.0) == 'D');
+    assert(s.foo("string") == 'S');
+}
+
+/***************************************************/
+
+struct Test19a
+{
+    char foo(int)
+    {
+        return 'I';
+    }
+}
+
+struct Test19b
+{
+    char foo(string)
+    {
+        return 'S';
+    }
+
+    double foo(double)
+    {
+        return 'D';
+    }
+}
+
+struct Test19
+{
+    Test19a a;
+    Test19b b;
+    alias a this;
+
+    char foo(string)
+    {
+        return 'X';
+    }
+}
+
+void test19()
+{
+    Test19 s;
+    assert(s.foo("string") == 'X');
+    static assert(!__traits(compiles, (){s.foo(1);})); //hidden by S.foo(string)
+    static assert(!__traits(compiles, (){s.foo(1.0);}));
+}
+
+/***************************************************/
 
 int main()
 {
@@ -2202,7 +2327,9 @@ int main()
     test14();
     test15();
     test16();
-
+    test17();
+    test18();
+    test19();
     printf("Success\n");
     return 0;
 }

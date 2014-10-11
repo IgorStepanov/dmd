@@ -73,7 +73,7 @@ bool atFindOpUnaBin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
     e1 = (BinExp *)e1->copy();
     UnaExp *ae1 = (UnaExp *)e1->e1;
     ae1 = (UnaExp *)ae1->copy();
-
+    e1->att1 = true;
     ae1->e1 = e; //replace bin(una(e1), ...) with bin(una(e1.%aliasthis%), ...)
     e1->e1 = ae1;
     ae1->att1 = true;
@@ -85,7 +85,6 @@ bool atFindOpUnaBin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
     }
     return false;
 }
-
 bool atFindOpExp2Bin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
 {
     BinExp *e1 = (BinExp*)ctx;
@@ -93,6 +92,45 @@ bool atFindOpExp2Bin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
     e1->e2 = e; //replace bin(..., e2) with bin(..., e2.%aliasthis%)
 
     Expression *e2 = e1->trySemantic(sc);
+    if (e2)
+    {
+        *outexpr = e2;
+        return true;
+    }
+    return false;
+}
+
+//replace una(una(e1)) with una(una(e1.%aliasthis%))
+bool atFindOpUnaUna(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    UnaExp *ue = (UnaExp *)((UnaExp *)ctx)->syntaxCopy();
+    UnaExp *ae = (UnaExp *)ue->e1;
+    ae = (UnaExp *)ae->copy();
+    ue->att1 = true;
+    ae->e1 = e;
+    ue->e1 = ae;
+    Expression *e2 = ue->trySemantic(sc);
+    if (e2)
+    {
+        *outexpr = e2;
+        return true;
+    }
+    return false;
+}
+
+bool atFindDotIdCall(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+{
+    UnaExp *ue = (UnaExp *)((UnaExp *)ctx)->syntaxCopy();
+    assert(ue->e1->op == TOKdot);
+    DotIdExp *die = (DotIdExp *)ue->e1;
+    die = (DotIdExp *)die->copy();
+    ue->att1 = true;
+    die->e1 = e;
+    Expression *ey = die->semanticY(sc, 1);
+    if (!ey)
+        return false;
+    ue->e1 = ey;
+    Expression *e2 = ue->trySemantic(sc);
     if (e2)
     {
         *outexpr = e2;
@@ -860,7 +898,11 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
         }
         else
         {
-            if (Expression *ey = die->semanticY(sc, 1))
+            unsigned att = t->att;
+            t->att |= RECtracing;
+            Expression *ey = die->semanticY(sc, 1);
+            t->att = att;
+            if (ey)
             {
                 if (ey->op == TOKerror)
                     return ey;
@@ -875,6 +917,24 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
                 }
                 else
                     return NULL;
+            }
+            if (t->ty == Tclass || t->ty == Tstruct)
+            {
+                Expressions results;
+                iterateAliasThis(sc, eleft, &atFindDotIdCall, ce, &results);
+                if (results.dim == 1)
+                {
+                    return results[0];
+                }
+                else if (results.dim > 1)
+                {
+                    ce->error("Unable to unambiguously resolve %s Candidates:", ce->toChars());
+                    for (int j = 0; j < results.dim; ++j)
+                    {
+                        ce->error("%s", results[j]->toChars());
+                    }
+                    return new ErrorExp();
+                }
             }
         }
         e = searchUFCS(sc, die, ident);
@@ -7485,7 +7545,7 @@ Expression *DotIdExp::semanticY(Scope *sc, int flag)
     }
     else
     {
-        if (e1->op == TOKtype || e1->op == TOKtemplate)
+        if ((e1->op == TOKtype && !(e1->type->att & RECtracing)) || e1->op == TOKtemplate)
             flag = 0;
         e = e1->type->dotExp(sc, e1, ident, flag);
         if (!flag || e)
