@@ -5907,59 +5907,69 @@ MATCH TypeFunction::callMatch(Type *tthis, Expressions *args, int flag)
                     goto Nomatch;
             }
 
-            if (targb->ty == Tclass || targb->ty == Tstruct)
+            if (ta->toBasetype()->ty == Tclass || ta->toBasetype()->ty == Tstruct)
             {
-                if (targb->ty == Tclass || targb->ty == Tstruct)
+                Types basetypes;
+                Array<bool> islvalues;
+                Types results_exact;
+                Types results_convert;
+                bool last_exact_l_value = 0;
+                bool last_convert_l_value = 0;
+                getAliasThisTypes(arg->type, &basetypes, &islvalues);
+
+                for (int i = 0; i < basetypes.dim; i++)
                 {
-                    Types basetypes;
-                    Types results_exact;
-                    Types results_convert;
-                    getAliasThisTypes(arg->type, &basetypes);
-
-                    for (int i = 0; i < basetypes.dim; i++)
+                    unsigned oldatt = basetypes[i]->att;
+                    basetypes[i]->att |= RECtracing;
+                    MATCH mx = basetypes[i]->implicitConvTo(tprm);
+                    basetypes[i]->att = oldatt;
+                    if (mx == MATCHexact)
                     {
-                        unsigned oldatt = basetypes[i]->att;
-                        basetypes[i]->att |= RECtracing;
-                        MATCH mx = basetypes[i]->implicitConvTo(tprm);
-                        basetypes[i]->att = oldatt;
-                        if (mx == MATCHexact)
-                        {
-                            results_exact.push(basetypes[i]);
-                        }
-                        else if(mx != MATCHnomatch)
-                        {
-                            results_convert.push(basetypes[i]);
-                        }
+                        results_exact.push(basetypes[i]);
+                        last_exact_l_value = islvalues[i];
                     }
-
-                    if (results_exact.dim == 1)
+                    else if(mx != MATCHnomatch)
                     {
-                        targb = results_exact[0];
+                        results_convert.push(basetypes[i]);
+                        last_convert_l_value = islvalues[i];
                     }
-                    else if (results_exact.dim > 1)
+                }
+
+                if (results_exact.dim == 1)
+                {
+                    if (p->storageClass & STCref && !last_exact_l_value)
                     {
-                        arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
-                        for (int j = 0; j < results_exact.dim; ++j)
-                        {
-                            arg->error("%s", results_exact[j]->toChars());
-                        }
                         goto Nomatch;
                     }
-                    else
+                    ta = results_exact[0];
+                }
+                else if (results_exact.dim > 1)
+                {
+                    arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
+                    for (int j = 0; j < results_exact.dim; ++j)
                     {
-                        if (results_convert.dim == 1)
+                        arg->error("%s", results_exact[j]->toChars());
+                    }
+                    goto Nomatch;
+                }
+                else
+                {
+                    if (results_convert.dim == 1)
+                    {
+                        if (p->storageClass & STCref && !last_convert_l_value)
                         {
-                            targb = results_convert[0];
-                        }
-                        else if (results_convert.dim > 1)
-                        {
-                            arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
-                            for (int j = 0; j < results_convert.dim; ++j)
-                            {
-                                arg->error("%s", results_convert[j]->toChars());
-                            }
                             goto Nomatch;
                         }
+                        ta = results_convert[0];
+                    }
+                    else if (results_convert.dim > 1)
+                    {
+                        arg->error("Unable to unambiguously represent %s as %s; Candidates:", arg->type->toChars(), tprm->toChars());
+                        for (int j = 0; j < results_convert.dim; ++j)
+                        {
+                            arg->error("%s", results_convert[j]->toChars());
+                        }
+                        goto Nomatch;
                     }
                 }
             }

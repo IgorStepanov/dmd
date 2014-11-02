@@ -130,10 +130,15 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
     }
 
     depth_counter->ptrvalue = NULL;
+    return r;
 }
 
-Type *aliasThisOf(Type *t, int idx)
+Type *aliasThisOf(Type *t, int idx, bool *islvalue = NULL)
 {
+    bool dummy;
+    if (!islvalue)
+        islvalue = &dummy;
+    *islvalue = false;
     AggregateDeclaration *ad = isAggregate(t);
     if (ad && ad->aliasThisSymbols && ad->aliasThisSymbols->dim > idx)
     {
@@ -148,6 +153,7 @@ Type *aliasThisOf(Type *t, int idx)
             if (d->isVarDeclaration() && d->needThis())
             {
                 t2 = t2->addMod(t->mod);
+                *islvalue = true; //Variable is always l-value
             }
             else if (d->isFuncDeclaration())
             {
@@ -162,6 +168,8 @@ Type *aliasThisOf(Type *t, int idx)
                     if (!t2) // issue 14185
                         return Type::terror;
                     t2 = t2->substWildTo(t->mod == 0 ? MODmutable : t->mod);
+                    if (((TypeFunction *)fd->type)->isref)
+                        *islvalue = true;
                 }
                 else
                     return Type::terror;
@@ -185,6 +193,8 @@ Type *aliasThisOf(Type *t, int idx)
             {
                 Type *t2 = fd->type->nextOf();
                 t2 = t2->substWildTo(t->mod == 0 ? MODmutable : t->mod);
+                if (((TypeFunction *)fd->type)->isref)
+                    *islvalue = true;
                 return t2;
             }
             else
@@ -195,71 +205,51 @@ Type *aliasThisOf(Type *t, int idx)
     return NULL;
 }
 
-void getAliasThisTypes(Type *t, Types *ret)
+void getAliasThisTypes(Type *t, Types *ret, Array<bool> *islvalues)
 {
     assert(ret);
-    if (t->ty == Tstruct)
+    int a_count = 0;
+    AggregateDeclaration *ad = isAggregate(t);
+    if (ad && ad->aliasThisSymbols)
+        a_count = ad->aliasThisSymbols->dim;
+
+    for (int i = 0; i < a_count; i++)
     {
-        TypeStruct *ts = (TypeStruct*)t;
-        StructDeclaration *sd = ts->sym;
-        int a_count = sd->aliasThisSymbols ? sd->aliasThisSymbols->dim : 0;
-        for (int i = 0; i < a_count; i++)
+        bool islvalue = false;
+        Type *a = aliasThisOf(t, i, &islvalue);
+        if (!a)
+            continue;
+
+        bool duplicate = false;
+
+        for (int j = 0; j < ret->dim; ++j)
         {
-            Type *a = aliasThisOf(ts, i);
-            if (!a) //tuple alias this
-                continue;
-
-            bool duplicate = false;
-
-            for (int j = 0; j < ret->dim; ++j)
+            if ((*ret)[j]->equals(a))
             {
-                if ((*ret)[j]->equals(a))
-                {
-                    duplicate = true;
-                    break;
-                }
+                duplicate = true;
+                break;
             }
-            if (!duplicate)
+        }
+        if (!duplicate)
+        {
+            ret->push(a);
+            if (islvalues)
             {
-                ret->push(a);
-                getAliasThisTypes(a, ret);
+                islvalues->push(islvalue);
             }
+            getAliasThisTypes(a, ret);
         }
     }
-    else if (t->ty == Tclass)
+
+    if (ClassDeclaration *cd = ad ? ad->isClassDeclaration() : NULL)
     {
-        TypeClass *tc = (TypeClass*)t;
-        ClassDeclaration *cd = tc->sym;
-        int a_count = cd->aliasThisSymbols ? cd->aliasThisSymbols->dim : 0;
-        for (int i = 0; i < a_count; i++)
-        {
-            Type *a = aliasThisOf(tc, i);
-            assert(a);
-
-            bool duplicate = false;
-
-            for (int j = 0; j < ret->dim; ++j)
-            {
-                if ((*ret)[j]->equals(a))
-                {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (!duplicate)
-            {
-                ret->push(a);
-                getAliasThisTypes(a, ret);
-            }
-        }
-
         for (int i = 0; i < cd->baseclasses->dim; i++)
         {
             ClassDeclaration *bd = (*cd->baseclasses)[i]->base;
             Type *bt = (*cd->baseclasses)[i]->type;
             if (!bt)
                 bt = bd->type;
-            getAliasThisTypes(bt, ret);
+            getAliasThisTypes(bt, ret, islvalues);
         }
     }
 }

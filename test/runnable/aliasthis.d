@@ -2263,6 +2263,63 @@ void test19()
     static assert(!__traits(compiles, (){s.foo(1.0);}));
 }
 
+
+struct Test20a
+{
+    int a = 1;
+    alias a this;
+}
+
+struct Test20b
+{
+    int foo() { return 1; };
+    alias foo this;
+}
+
+int test20x(ref int x)
+{
+    return 1;
+}
+
+int test20x(int x)
+{
+    return 2;
+}
+
+void test20()
+{
+    Test20a a;
+    Test20b b;
+    assert(test20x(a) == 1);
+    assert(test20x(b) == 2);
+}
+
+struct Test21a
+{
+    int a = 1;
+    alias a this;
+}
+
+struct Test21
+{
+    Test20a a;
+    Test20b b;
+    alias a this;
+    alias b this;
+}
+
+int test21x(ref int x)
+{
+    return 1;
+}
+
+void test21()
+{
+    Test21 t;
+    static assert(!__traits(compiles, {test21x(t);}));
+}
+
+
 /***************************************************/
 
 int main()
