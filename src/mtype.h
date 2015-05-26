@@ -46,10 +46,11 @@ typedef struct TYPE type;
 #endif
 
 void semanticTypeInfo(Scope *sc, Type *t);
-MATCH deduceType(RootObject *o, Scope *sc, Type *tparam, TemplateParameters *parameters, Objects *dedtypes, unsigned *wm = NULL, size_t inferStart = 0);
+MATCH deduceType(Loc loc, RootObject *o, Scope *sc, Type *tparam, TemplateParameters *parameters, Objects *dedtypes, unsigned *wm = NULL, size_t inferStart = 0);
 Type *reliesOnTident(Type *t, TemplateParameters *tparams = NULL, size_t iStart = 0);
 StorageClass ModToStc(unsigned mod);
-void getAliasThisTypes(Type *t, Types *ret, Array<bool> *islavalues = NULL);
+void getAliasThisTypes(Type *t, Types *ret, Bools *islavalues = NULL);
+MATCH implicitConvToWithAliasThis(Loc loc, Type *from, Type *to, Type *root_from = NULL, OutBuffer *buff = NULL, int *state = NULL, OutBuffer *matchname = NULL);
 
 enum ENUMTY
 {

@@ -42,7 +42,7 @@
 #include "nspace.h"
 #include "ctfe.h"
 
-bool typeMerge(Scope *sc, TOK op, Type **pt, Expression **pe1, Expression **pe2);
+bool typeMerge(Scope *sc, TOK op, Type **pt, Expression **pe1, Expression **pe2, bool ignorealiastthis = false);
 bool isArrayOpValid(Expression *e);
 Expression *expandVar(int result, VarDeclaration *v);
 TypeTuple *toArgTypes(Type *t);
@@ -85,16 +85,28 @@ bool atFindOpUnaBin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
     }
     return false;
 }
+
 bool atFindOpExp2Bin(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
 {
     BinExp *e1 = (BinExp*)ctx;
     e1 = (BinExp *)e1->copy();
-    e1->e2 = e; //replace bin(..., e2) with bin(..., e2.%aliasthis%)
 
-    Expression *e2 = e1->trySemantic(sc);
-    if (e2)
+    //e1->e2 = e; //replace bin(..., e2) with bin(..., e2.%aliasthis%)
+
+    e1->e1 = e1->e1->semantic(sc);
+    e1->e2 = e->semantic(sc);
+    assert(e1->e1->type);
+    assert(e1->e2->type);
+    unsigned tatt1 = e1->e1->type->att;
+    e1->e1->type->att |= RECtracing;
+    unsigned tatt2 = e1->e2->type->att;
+    e1->e2->type->att |= RECtracing;
+    MATCH conv = e1->e1->type->implicitConvTo(e1->e2->type);
+    e1->e2->type->att = tatt2;
+    e1->e1->type->att = tatt1;
+    if (conv != MATCHnomatch)
     {
-        *outexpr = e2;
+        *outexpr = e1->semantic(sc);
         return true;
     }
     return false;
@@ -921,7 +933,7 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
             if (t->ty == Tclass || t->ty == Tstruct)
             {
                 Expressions results;
-                iterateAliasThis(sc, eleft, &atFindDotIdCall, ce, &results);
+                iterateAliasThis(sc, eleft, &atFindDotIdCall, (void*)ce, &results);
                 if (results.dim == 1)
                 {
                     return results[0];
@@ -2674,14 +2686,14 @@ bool Expression::checkNogc(Scope *sc, FuncDeclaration *f)
     return false;
 }
 
-static bool atCheckBoolean(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
+static bool atToBoolean(Scope *sc, Expression *e, void *ctx, Expression **outexpr)
 {
     unsigned errors = global.startGagging();
     bool err = false;
     Type *etb = e->type->toBasetype();
     unsigned oatt = etb->att;
     etb->att |= RECtracing;
-    Expression* eret = e->checkToBoolean(sc);
+    Expression* eret = e->toBoolean(sc);
     etb->att = oatt;
     if (eret && eret->op == TOKerror)
         err = true;
@@ -2817,7 +2829,7 @@ Lagain:
         if (!(tb->att & RECtracing))
         {
             Expressions results;
-            iterateAliasThis(sc, e, &atCheckBoolean, NULL, &results);
+            iterateAliasThis(sc, e, &atToBoolean, NULL, &results);
 
             if (results.dim == 1)
             {
@@ -3343,7 +3355,7 @@ Expression *IdentifierExp::semantic(Scope *sc)
             e = e->semantic(sc);
 
             Expressions results;
-            iterateAliasThis(sc, e, &atFindMember, ident, &results);
+            iterateAliasThis(sc, e, &atFindMember, (void*)ident, &results);
 
             if (results.dim == 1)
             {
@@ -6484,10 +6496,18 @@ Expression *IsExp::semantic(Scope *sc)
         //printf("tspec = %s, %s\n", tspec->toChars(), tspec->deco);
         if (tok == TOKcolon)
         {
-            if (targ->implicitConvTo(tspec))
+            //ignore alias this while scanning
+            unsigned old_att = targ->att;
+            targ->att |= RECtracing;
+            MATCH m = targ->implicitConvTo(tspec);
+            targ->att = old_att;
+            if (m)
                 goto Lyes;
-            else
-                goto Lno;
+
+            m = implicitConvToWithAliasThis(loc, targ, tspec);
+            if (m)
+                goto Lyes;
+            goto Lno;
         }
         else /* == */
         {
@@ -6516,7 +6536,7 @@ Expression *IsExp::semantic(Scope *sc)
         dedtypes.setDim(parameters->dim);
         dedtypes.zero();
 
-        MATCH m = deduceType(targ, sc, tspec, parameters, &dedtypes);
+        MATCH m = deduceType(loc, targ, sc, tspec, parameters, &dedtypes);
         //printf("targ: %s\n", targ->toChars());
         //printf("tspec: %s\n", tspec->toChars());
         if (m <= MATCHnomatch ||
@@ -8571,7 +8591,7 @@ Lagain:
                 {
                     att1 = true;
                     Expressions results;
-                    iterateAliasThis(sc, e1, &atFindOpUna, this, &results);
+                    iterateAliasThis(sc, e1, &atFindOpUna, (void*)this, &results);
 
                     if (results.dim == 1)
                     {
@@ -10075,7 +10095,7 @@ Lagain:
         if (!att1)
         {
             Expressions results;
-            iterateAliasThis(sc, e1, &atFindOpUna, this, &results);
+            iterateAliasThis(sc, e1, &atFindOpUna, (void*)this, &results);
 
             if (results.dim == 1)
             {
@@ -11114,7 +11134,7 @@ Expression *AssignExp::semantic(Scope *sc)
             if (!ae->att1)
             {
                 Expressions results;
-                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, this, &results);
+                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, (void*)this, &results);
 
                 if (results.dim == 1)
                 {
@@ -11190,7 +11210,7 @@ Expression *AssignExp::semantic(Scope *sc)
             if (!ae->att1)
             {
                 Expressions results;
-                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, this, &results);
+                iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, (void*)this, &results);
 
                 if (results.dim == 1)
                 {
@@ -11534,13 +11554,16 @@ Expression *AssignExp::semantic(Scope *sc)
                         return new ErrorExp();
                 }
             }
-            else    // Bugzilla 11355
+            else //
             {
+                /*Expression *e = op_overload(sc);
+                if (e)
+                    return e;*/
                 AggregateDeclaration *ad2 = isAggregate(e2x->type);
                 if (ad2 && !att1)
                 {
                     Expressions results;
-                    iterateAliasThis(sc, e2, &atFindOpUna2Bin, this, &results);
+                    iterateAliasThis(sc, e2, &atFindOpExp2Bin, (void*)this, &results);
 
                     if (results.dim == 1)
                     {

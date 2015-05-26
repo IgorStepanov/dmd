@@ -426,6 +426,11 @@ struct T11875y(C)
 class D11875c { T11875y!D11875b c; alias c this; }
 static assert(is(D11875c : T11875y!D, D) && is(D == D11875b));
 
+class D11875d { T11875y!D11875b c; alias c this; }
+class D11875e { D11875c c; D11875d d; alias c this; alias d this; }
+//There are multiple ways to convert from D11875e to T11875y!D11875b
+static assert(!__traits(compiles, {assert(is(D11875e : T11875y!D, D) && is(D == D11875b));}));
+
 /***************************************************/
 // 11930
 
@@ -838,15 +843,19 @@ struct A6434
    Variant6434 i;
    alias i this;
 
-   void opDispatch(string name)()
+   int opDispatch(string name)()
    {
+       return 42;
    }
 }
 
 void test6434()
 {
    A6434 a;
-   a.weird; // no property 'weird' for type 'VariantN!(maxSize)'
+   //alias this and opDispatch shouln't be in the same type
+   static assert(!__traits(compiles, {auto i = a.weird;}));
+   auto i = a.opDispatch!"weird"();
+   assert(i == 42);
 }
 
 /**************************************/
@@ -1876,17 +1885,16 @@ void test9()
     static assert(!__traits(compiles, (){long b = t9;}));    // Can't be unambiguously resolved, because candidates have a different types
     static assert(!__traits(compiles, (){double d = t9;}));  // and direct alias this isn't exactly casted tot target type.
 
-    static assert(is(Test9 : int));
-    static assert(is(Test9 : string)); // Yes, Test9 is a string subtype (because Test9 is a Test9a subtype and Test9a
-                                       // is a string subtype. However Test9 cannot be casted to string directly, because
-                                       // there are conflict
+    static assert(!__traits(compiles, (){static assert(is(Test9 : int));}));
+    static assert(!__traits(compiles, (){static assert(is(Test9 : string));}));
 
     static assert(!__traits(compiles, (){long b = t9x;}));    // Can't be unambiguously resolved, because candidates have a different types
     static assert(!__traits(compiles, (){double d = t9x;}));  // and direct alias this isn't exactly casted tot target type.
 
-    static assert(is(Test9x : int));
-    static assert(is(Test9x : string));
+    static assert(!__traits(compiles, (){static assert(is(Test9x : int));}));
+    static assert(!__traits(compiles, (){static assert(is(Test9x : string));}));
 }
+
 
 /***************************************************/
 

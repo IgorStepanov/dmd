@@ -1475,7 +1475,7 @@ Expression *castTo(Expression *e, Scope *sc, Type *t)
             if (AggregateDeclaration *t1ad = isAggregate(t1b))
             {
                 AggregateDeclaration *toad = isAggregate(tob);
-                if (t1ad != toad && t1ad->aliasThisSymbols)
+                if (t1ad != toad)
                 {
                     if (t1b->ty == Tclass && tob->ty == Tclass)
                     {
@@ -1504,7 +1504,7 @@ Expression *castTo(Expression *e, Scope *sc, Type *t)
                     if (tryaliasthis)
                     {
                         Expressions results;
-                        iterateAliasThis(sc, e, &atCastTo, t, &results);
+                        iterateAliasThis(sc, e, &atCastTo, (void*)t, &results);
                         if (results.dim == 1)
                         {
                             results[0] = results[0]->castTo(sc, t);
@@ -1581,6 +1581,15 @@ Expression *castTo(Expression *e, Scope *sc, Type *t)
             {
                 goto Lfail;
             }
+
+            // Bugzilla 14093: Tclass <--> Tstruct
+            // All legit ways to convert class <--> struct have been already tried.
+            if (tob->ty == Tclass && t1b->ty == Tstruct ||
+                t1b->ty == Tstruct && tob->ty == Tclass)
+            {
+                goto Lfail;
+            }
+
             if (t1b->ty == Tvoid && tob->ty != Tvoid && e->op != TOKfunction)
             {
             Lfail:
@@ -2597,13 +2606,13 @@ void findAliasThisSubtypes(Scope *sc, Expression *e, Expressions *candidates)
 {
     if (e->type->ty == Tstruct || e->type->ty == Tclass)
     {
-        iterateAliasThis(sc, e, &atFindSubtypes, candidates, candidates);
+        iterateAliasThis(sc, e, &atFindSubtypes, (void*)candidates, candidates);
     }
 }
 
-int typeMerge(Scope *sc, Expression *e, Type **pt, Expression **pe1, Expression **pe2, bool ignorealiastthis = false);
+bool typeMerge(Scope *sc, TOK op, Type **pt, Expression **pe1, Expression **pe2, bool ignorealiastthis = false);
 
-int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expression **pe2)
+bool mergeAliasThis(Scope *sc, Type **pt, TOK op, Expression **pe1, Expression **pe2)
 {
     //printf("merge aliasthis: (%s) and (%s)\n", (*pe1)->toChars(), (*pe2)->toChars());
     assert(*pe1);
@@ -2652,7 +2661,7 @@ int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expres
             unsigned oldatt2 = e2->type->att;
             candidates1[i]->type->att |= RECtracing;
             e2->type->att |= RECtracing;
-            if (typeMerge(sc, e, pt, &candidates1[i], &e2, true))
+            if (typeMerge(sc, op, pt, &candidates1[i], &e2, true))
             {
                 candidates1ret.push(candidates1[i]);
                 candidates2ret.push(e2);
@@ -2671,7 +2680,7 @@ int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expres
             unsigned oldatt2 = candidates2[i]->type->att;
             e1->type->att |= RECtracing;
             candidates2[i]->type->att |= RECtracing;
-            if (typeMerge(sc, e, pt, &e1, &candidates2[i], true))
+            if (typeMerge(sc, op, pt, &e1, &candidates2[i], true))
             {
                 candidates1ret.push(e1);
                 candidates2ret.push(candidates2[i]);
@@ -2688,16 +2697,16 @@ int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expres
         *pe1 = candidates1ret[0];
         *pe2 = candidates2ret[0];
         *pt = candidates1ret[0]->type;
-        return 1;
+        return true;
     }
     else if (candidates1ret.dim > 1)
     {
-        e->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
+        e1->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
         for (int i = 0; i < candidates1ret.dim; i++)
         {
-            e->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
+            e1->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
         }
-        return 0;
+        return false;
     }
 
     // try to merge e1.aliasthis and e2.aliasthis
@@ -2709,7 +2718,7 @@ int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expres
             unsigned oldatt2 = candidates2[i]->type->att;
             candidates1[i]->type->att |= RECtracing;
             candidates2[i]->type->att |= RECtracing;
-            if (typeMerge(sc, e, pt, &candidates1[i], &candidates2[j], true))
+            if (typeMerge(sc, op, pt, &candidates1[i], &candidates2[j], true))
             {
                 candidates1ret.push(candidates1[i]);
                 candidates2ret.push(candidates2[j]);
@@ -2723,23 +2732,23 @@ int mergeAliasThis(Scope *sc, Type **pt, Expression *e, Expression **pe1, Expres
 
     if (candidates1ret.dim == 0)
     {
-        return 0;
+        return false;
     }
     else if (candidates1ret.dim == 1)
     {
         *pe1 = candidates1ret[0];
         *pe2 = candidates2ret[0];
         *pt = candidates1ret[0]->type;
-        return 1;
+        return true;
     }
     else
     {
-        e->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
+        e1->error("unable to determine common type for (%s) and (%s); candidates:", (*pe1)->toChars(), (*pe2)->toChars());
         for (int i = 0; i < candidates1ret.dim; i++)
         {
-            e->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
+            e1->error("(%s) and (%s)", candidates1ret[i]->toChars(), candidates2ret[i]->toChars());
         }
-        return 0;
+        return false;
     }
 }
 /**************************************
@@ -3107,7 +3116,7 @@ Lcc:
                     Expression *te1 = e1;
                     Expression *te2 = e2;
                     Type *tt1 = t;
-                    int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                    int r = mergeAliasThis(sc, &tt1, op, &te1, &te2);
                     if (r)
                     {
                         e1 = te1;
@@ -3131,7 +3140,7 @@ Lcc:
                 Expression *te1 = e1;
                 Expression *te2 = e2;
                 Type *tt1 = *pt;
-                int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                int r = mergeAliasThis(sc, &tt1, op, &te1, &te2);
                 if (r)
                 {
                     e1 = te1;
@@ -3150,7 +3159,7 @@ Lcc:
                 Expression *te1 = e1;
                 Expression *te2 = e2;
                 Type *tt1 = *pt;
-                int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+                int r = mergeAliasThis(sc, &tt1, op, &te1, &te2);
                 if (r)
                 {
                     e1 = te1;
@@ -3189,7 +3198,7 @@ Lcc:
             Expression *te1 = e1;
             Expression *te2 = e2;
             Type *tt1 = t;
-            int r = mergeAliasThis(sc, &tt1, e, &te1, &te2);
+            int r = mergeAliasThis(sc, &tt1, op, &te1, &te2);
             if (r)
             {
                 e1 = te1;

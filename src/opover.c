@@ -264,7 +264,7 @@ static bool atBinExpBoth(Scope *sc, Expression *e, void *ctx_, Expression **oute
     be->e1 = e;
 
     // e1.aliasthis op e2 => e1.aliasthis op e2.aliasthis
-    int ret = iterateAliasThis(sc, be->e2, &atBinExpRvl, be, ctx->results);
+    int ret = iterateAliasThis(sc, be->e2, &atBinExpRvl, (void*)be, ctx->results);
 
     if (ret) //we don't need write to results: previous call have done it.
         return true;
@@ -276,13 +276,13 @@ void resloveAliasThisForBinExp(Scope *sc, BinExp *be, bool check_lvl, bool check
     if (check_lvl)
     {
         // e1 op e2 => e1.aliasthis op e2
-        iterateAliasThis(sc, be->e1, &atBinExpLvl, be, ret);
+        iterateAliasThis(sc, be->e1, &atBinExpLvl, (void*)be, ret);
     }
 
     if (check_rvl)
     {
         // e1 op e2 => e1 op e2.aliasthis
-        iterateAliasThis(sc, be->e2, &atBinExpRvl, be, ret);
+        iterateAliasThis(sc, be->e2, &atBinExpRvl, (void*)be, ret);
     }
 
     if (ret->dim == 1)
@@ -407,7 +407,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                         Expression *e1 = ae->copy();
 
                         Expressions results;
-                        iterateAliasThis(sc, ae->e1, &atFindOpUnaUna, e, &results);
+                        iterateAliasThis(sc, ae->e1, &atFindOpUnaUna, (void*)e, &results);
                         if (results.dim == 1)
                         {
                             result = results[0];
@@ -499,7 +499,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                         ue->att1 = true;
 
                         Expressions results;
-                        iterateAliasThis(sc, se->e1, &atFindOpUnaUna, ue, &results);
+                        iterateAliasThis(sc, se->e1, &atFindOpUnaUna, (void*)ue, &results);
                         if (results.dim == 1)
                         {
                             result = results[0];
@@ -574,7 +574,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                      */
 
                     Expressions results;
-                    iterateAliasThis(sc, e->e1, &atFindOpUna, e, &results);
+                    iterateAliasThis(sc, e->e1, &atFindOpUna, (void*)e, &results);
                     if (results.dim == 1)
                     {
                         result = results[0];
@@ -662,7 +662,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                      */
 
                     Expressions results;
-                    iterateAliasThis(sc, ae->e1, &atFindOpUna, ae, &results);
+                    iterateAliasThis(sc, ae->e1, &atFindOpUna, (void*)ae, &results);
                     if (results.dim == 1)
                     {
                         result = results[0];
@@ -723,7 +723,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                      */
 
                     Expressions results;
-                    iterateAliasThis(sc, e->e1, &atFindOpUna, e, &results);
+                    iterateAliasThis(sc, e->e1, &atFindOpUna, (void*)e, &results);
 
                     if (results.dim == 1)
                     {
@@ -1169,7 +1169,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                     if (!e->att1)
                     {
                         Expressions results;
-                        iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, e, &results);
+                        iterateAliasThis(sc, ae->e1, &atFindOpUnaBin, (void*)e, &results);
 
                         if (results.dim == 1)
                         {
@@ -1258,7 +1258,7 @@ Expression *op_overload(Expression *e, Scope *sc)
                     if (!e->att1)
                     {
                         Expressions results;
-                        iterateAliasThis(sc, se->e1, &atFindOpUnaBin, e, &results);
+                        iterateAliasThis(sc, se->e1, &atFindOpUnaBin, (void*)e, &results);
 
                         if (results.dim == 1)
                         {
@@ -1712,7 +1712,7 @@ bool inferAggregate(ForeachStatement *fes, Scope *sc, Dsymbol *&sapply)
                 if (!(fes->aggr->type->att & RECtracing))
                 {
                     Expressions results;
-                    iterateAliasThis(sc, fes->aggr, &atResolveForeach, fes, &results);
+                    iterateAliasThis(sc, fes->aggr, &atResolveForeach, (void*)fes, &results);
 
                     if (results.dim == 1)
                     {

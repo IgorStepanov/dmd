@@ -1347,7 +1347,7 @@ struct FindMemberCtx
     Dsymbols* candidates;
 };
 
-static bool atFindMember(Scope *sc, Expression *e, void *ctx_, Expression **outexpr)
+static bool atFindMember2(Scope *sc, Expression *e, void *ctx_, Expression **outexpr)
 {
     FindMemberCtx *ctx = (FindMemberCtx*)ctx_;
     Dsymbol *s = NULL;
@@ -1409,7 +1409,7 @@ Dsymbol *WithScopeSymbol::search(Loc loc, Identifier *ident, int flags)
     Expressions results;
 
     FindMemberCtx ctx = {loc, ident, flags, &candidates};
-    iterateAliasThis(scope, e, &atFindMember, &ctx, &results);
+    iterateAliasThis(scope, e, &atFindMember2, &ctx, &results);
 
     if (candidates.dim == 1)
     {

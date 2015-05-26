@@ -145,6 +145,7 @@ Type::Type(TY ty)
     this->arrayof = NULL;
     this->vtinfo = NULL;
     this->ctype = NULL;
+    this->att = RECinit;
 }
 
 const char *Type::kind()
@@ -2198,6 +2199,11 @@ Expression *Type::noMember(Scope *sc, Expression *e, Identifier *ident, int flag
         fd = search_function(sym, Id::opDispatch);
         if (fd)
         {
+            if (sym->aliasThisSymbols && sym->aliasThisSymbols->dim)
+            {
+                fd->error("Unable to mix alias this and opDispatch it a one struct or class.", fd->kind());
+                return new ErrorExp();
+            }
             /* Rewrite e.ident as:
              *  e.opDispatch!("ident")
              */
@@ -5910,7 +5916,7 @@ MATCH TypeFunction::callMatch(Type *tthis, Expressions *args, int flag)
             if (ta->toBasetype()->ty == Tclass || ta->toBasetype()->ty == Tstruct)
             {
                 Types basetypes;
-                Array<bool> islvalues;
+                Bools islvalues;
                 Types results_exact;
                 Types results_convert;
                 bool last_exact_l_value = 0;
@@ -7524,7 +7530,6 @@ TypeStruct::TypeStruct(StructDeclaration *sym)
         : Type(Tstruct)
 {
     this->sym = sym;
-    this->att = RECinit;
 }
 
 const char *TypeStruct::kind()
@@ -8046,7 +8051,9 @@ MATCH TypeStruct::implicitConvTo(Type *to)
         }
     }
     else
+    {
         m = MATCHnomatch;       // no match
+    }
     return m;
 }
 
@@ -8096,7 +8103,6 @@ TypeClass::TypeClass(ClassDeclaration *sym)
         : Type(Tclass)
 {
     this->sym = sym;
-    this->att = RECinit;
 }
 
 const char *TypeClass::kind()

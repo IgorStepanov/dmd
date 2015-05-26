@@ -977,7 +977,8 @@
                 "typedef GotoStatements",
                 "typedef TemplateInstances",
                 "typedef Blocks",
-                "typedef Symbols"
+                "typedef Symbols",
+                "typedef Bools"
             ]
         },
         {
@@ -1091,7 +1092,9 @@
                 "struct TypeTuple",
                 "struct TypeSlice",
                 "struct TypeNull",
-                "struct Parameter"
+                "struct Parameter",
+                "struct FindDotIdCtx",
+                "function atFindDotId"
             ]
         },
         {
@@ -1177,7 +1180,8 @@
                 "struct TemplateInstance",
                 "function unSpeculative",
                 "function definitelyValueParameter",
-                "struct TemplateMixin"
+                "struct TemplateMixin",
+                "function atCheckErrors"
             ]
         },
         {
@@ -1923,7 +1927,9 @@
                 "struct WithScopeSymbol",
                 "struct ArrayScopeSymbol",
                 "struct OverloadSet",
-                "struct DsymbolTable"
+                "struct DsymbolTable",
+                "function atFindMember2",
+                "struct FindMemberCtx"
             ]
         },
         {
@@ -2459,12 +2465,22 @@
                 "mtype",
                 "opover",
                 "root.outbuffer",
-                "visitor"
+                "root.stringtable",
+                "visitor",
+                "arraytypes",
+                "dclass",
+                "denum",
+                "dtemplate",
+                "core.stdc.string"
             ],
             "members" :
             [
                 "struct AliasThis",
-                "function resolveAliasThis"
+                "function resolveAliasThis",
+                "function iterateAliasThis",
+                "function getAliasThisTypes",
+                "function implicitConvToWithAliasThis",
+                "function aliasThisOf"
             ]
         },
         {
@@ -2842,7 +2858,18 @@
                 "struct LineInitExp",
                 "struct ModuleInitExp",
                 "struct FuncInitExp",
-                "struct PrettyFuncInitExp"
+                "struct PrettyFuncInitExp",
+                "function atFindOpUna",
+                "function atFindOpUnaBin",
+                "function atFindOpExp2Bin",
+                "function atFindOpUnaUna",
+                "function atFindDotIdCall",
+                "function mergeAliasThis",
+                "function atFindSubtypes",
+                "function atCastTo",
+                "function findAliasThisSubtypes",
+                "function atFindMember",
+                "function atToBoolean"
             ]
         },
         {
@@ -2892,7 +2919,8 @@
                 "globals",
                 "mtype",
                 "statement",
-                "visitor"
+                "visitor",
+                "aliasthis"
             ],
             "members" :
             [
@@ -2908,7 +2936,13 @@
                 "function inferAggregate",
                 "function inferApplyArgTypes",
                 "function inferApplyArgTypesX",
-                "function inferApplyArgTypesY"
+                "function inferApplyArgTypesY",
+                "function atBinExpBoth",
+                "function atBinExpRvl",
+                "function atResolveForeach",
+                "function resloveAliasThisForBinExp",
+                "function atBinExpLvl",
+                "struct DoBothCtx"
             ]
         },
         {
@@ -3323,7 +3357,8 @@
         "AsyncRead",
 
         "Strings",
-        "Sections"
+        "Sections",
+        "Bools"
     ],
     "classTypes" :
     [

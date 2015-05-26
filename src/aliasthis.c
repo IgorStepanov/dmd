@@ -23,6 +23,9 @@
 #include "tokens.h"
 #include "enum.h"
 #include "template.h"
+#include "arraytypes.h"
+
+typedef Array<const char *> Strings;
 
 /**
  * iterateAliasThis resolves alias this subtypes for `e` and applies it to `dg`.
@@ -72,7 +75,7 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
     if (!depth_counter)
     {
         depth_counter = directtypes->insert(e->type->deco, strlen(e->type->deco));
-        depth_counter->ptrvalue = e;
+        depth_counter->ptrvalue = (void*)e;
     }
     else if (depth_counter->ptrvalue)
     {
@@ -80,7 +83,7 @@ bool iterateAliasThis(Scope *sc, Expression *e, bool (*dg)(Scope *sc, Expression
     }
     else
     {
-        depth_counter->ptrvalue = e;
+        depth_counter->ptrvalue = (void*)e;
     }
 
     bool r = false;
@@ -205,13 +208,138 @@ Type *aliasThisOf(Type *t, int idx, bool *islvalue = NULL)
     return NULL;
 }
 
-void getAliasThisTypes(Type *t, Types *ret, Array<bool> *islvalues)
+
+MATCH implicitConvToWithAliasThis(Loc loc, Type *from, Type *to, Type *root_from, OutBuffer *buff, int *state, OutBuffer *matchname)
+{
+    //printf("implicitConvToWithAliasThis(%s => %s), %d\n", from->toChars(), to->toChars(), from->att & RECtracing);
+    if (from->att & RECtracing)
+        return MATCHnomatch;
+    else if (from->equals(to))
+        return MATCHnomatch; //break unnecessary loop
+    unsigned old_att = from->att;
+    from->att |= RECtracing;
+    if (!buff)
+    {
+        buff = new OutBuffer();
+        buff->writestring(from->toChars());
+    }
+    int st = 0; //0 - no match
+                //1 - match
+                //2 - many matches
+    if (!state)
+        state = &st;
+
+    if (!matchname)
+    {
+        matchname = new OutBuffer();
+    }
+
+    if (!root_from)
+    {
+        root_from = from;
+    }
+    int a_count = 0;
+    AggregateDeclaration *ad = isAggregate(from);
+    if (!ad)
+        return MATCHnomatch;
+    AggregateDeclaration *err_ad = isAggregate(root_from);
+    assert(err_ad);
+    if (ad && ad->aliasThisSymbols)
+        a_count = (int)ad->aliasThisSymbols->dim;
+
+    MATCH mret = MATCHnomatch;
+    for (int i = 0; i < a_count; i++)
+    {
+        bool islvalue = false;
+        Type *a = aliasThisOf(from, i, &islvalue);
+        if (!a)
+            continue;
+
+        unsigned tatt = a->att;
+        a->att |= RECtracing;
+        MATCH m = a->implicitConvTo(to);
+        a->att = tatt;
+
+        if (m != MATCHnomatch)
+        {
+            if (*state == 0)
+            {
+                // the first match
+                *state = 1;
+                mret = m;
+                matchname->printf("%s.%s", buff->peekString(), (*ad->aliasThisSymbols)[i]->toChars());
+            }
+            else if (*state == 1)
+            {
+                // the second match
+                *state = 2;
+                err_ad->error(loc, "There are many candidates for cast %s to %s; Candidates:", root_from->toChars(), to->toChars());
+                err_ad->error(loc, " => %s", matchname->extractString());
+                matchname->printf("%s.%s", buff->peekString(), (*ad->aliasThisSymbols)[i]->toChars());
+                err_ad->error(loc, " => %s", matchname->extractString());
+            }
+            else
+            {
+                matchname->printf("%s.%s", buff->peekString(), (*ad->aliasThisSymbols)[i]->toChars());
+                err_ad->error(loc, " => %s", matchname->extractString());
+            }
+        }
+    }
+
+    //if (mret != MATCHnomatch)
+    //    return mret;
+
+    for (int i = 0; i < a_count; i++)
+    {
+        bool islvalue = false;
+        Type *a = aliasThisOf(from, i, &islvalue);
+        if (!a)
+            continue;
+
+        if (!(a->att & RECtracing))
+        {
+            OutBuffer next_buff;
+            next_buff.printf("%s.%s", buff->peekString(), (*ad->aliasThisSymbols)[i]->toChars());
+
+            MATCH m2 = implicitConvToWithAliasThis(loc, a, to, root_from, &next_buff, state, matchname);
+
+            if (mret == MATCHnomatch)
+                mret = m2;
+        }
+    }
+
+    if (ClassDeclaration *cd = ad ? ad->isClassDeclaration() : NULL)
+    {
+        for (int i = 0; i < cd->baseclasses->dim; i++)
+        {
+            ClassDeclaration *bd = (*cd->baseclasses)[i]->base;
+            Type *bt = (*cd->baseclasses)[i]->type;
+            if (!bt)
+                bt = bd->type;
+            if (!(bt->att & RECtracing))
+            {
+                OutBuffer next_buff;
+                next_buff.printf("(cast(%s)%s)", bt->toChars(), buff->peekString());
+
+                MATCH m2 = implicitConvToWithAliasThis(loc, bt, to, root_from, &next_buff, state, matchname);
+
+                if (mret == MATCHnomatch)
+                    mret = m2;
+            }
+        }
+    }
+    from->att = old_att;
+    //printf("implicitConvToWithAliasThis(%s => %s) = %d\n", from->toChars(), to->toChars(), mret != MATCHnomatch);
+    return mret;
+}
+
+void getAliasThisTypes(Type *t, Types *ret, Bools *islvalues)
 {
     assert(ret);
     int a_count = 0;
     AggregateDeclaration *ad = isAggregate(t);
     if (ad && ad->aliasThisSymbols)
-        a_count = ad->aliasThisSymbols->dim;
+        a_count = (int)ad->aliasThisSymbols->dim;
 
     for (int i = 0; i < a_count; i++)
     {
