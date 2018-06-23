@@ -203,6 +203,7 @@ bool iterateAliasThis(Scope* sc, Expression e, bool delegate(Scope* sc, Expressi
                       ref Expression[] ret, bool resolve_at = true, bool gagerrors = false, bool[string] directtypes = null)
 {
     Dsymbol aliasThisSymbol = null;
+    assert(e.type);
     Type baseType = e.type.toBasetype();
     if (baseType.ty == Tstruct)
     {
@@ -1150,3 +1151,95 @@ struct ForeachAliasThisCtx
         return false;
     }
 }
+
+private Expression[] getAliasThisTuples(Scope* sc, Expression e)
+{
+    Expression[] ret;
+    if (e.op == TOK.tuple)
+    {
+        ret ~= e;
+    }
+
+    //printf("e: %s\n", e.toChars());
+    iterateAliasThis(sc, e, (Scope* sc, Expression ie, ref Expression oe) {
+            if (ie.type.ty == Ttuple)
+            {
+                oe = ie;
+                return true;
+            }
+            return false;
+        }, ret);
+
+    for (size_t i = 0; i < ret.length; i++)
+    {
+        assert(ret[i].op == TOK.tuple);
+        //printf("ret[%u/%u]: %s\n", cast(uint)i, cast(uint)ret.length, ret[i].toChars());
+        expandAliasThisTuple(sc, cast(TupleExp) ret[i], ret);
+    }
+
+    if (e.op == TOK.tuple)
+    {
+        ret = ret[1 .. $];
+    }
+    return ret;
+}
+
+private void insertUnique(ref Expression[] ret, Expression e)
+{
+    foreach (e1; ret)
+    {
+        if (e1.equals(e))
+        {
+            return;
+        }
+    }
+    ret ~= e;
+}
+private void expandAliasThisTuple(Scope* sc, TupleExp e, ref Expression[] ret)
+{
+    for (size_t i = 0; i < e.exps.dim; i++)
+    {
+        Expression cur = (*e.exps)[i];
+        if (!cur.aliasthislock)
+        {
+            Expression[] exps = getAliasThisTuples(sc, cur);
+            foreach (cur_at; exps)
+            {
+                assert(cur_at.op == TOK.tuple);
+                TupleExp tcur_at = cast(TupleExp) cur_at;
+                TupleExp e1 = cast(TupleExp) e.syntaxCopy();
+
+                for (size_t k = 0; k < i; k++)
+                {
+                    (*e1.exps)[k].aliasthislock = true;
+                }
+                e1.exps.remove(i);
+                
+                for (size_t j = 0; j < tcur_at.exps.dim; j++)
+                {
+                    e1.exps.insert(i + j, (*tcur_at.exps)[j]);
+                }
+                ret.insertUnique(e1.expressionSemantic(sc));
+            }
+        }
+    }
+}
+
+Expression[] findTupleAliasThis(Scope* sc, Expression e, void delegate(Scope* sc, Expression aliasexpr, ref Expression outexpr) dg)
+{
+    Expression[] ret;
+    Expression[] exps = getAliasThisTuples(sc, e);
+
+    foreach (cur; exps)
+    {
+        Expression outexpr = null;
+        cur.aliasthislock = true;
+        dg(sc, cur, outexpr);
+        if (outexpr)
+            ret ~= outexpr;
+    }
+
+    return ret;
+}
+
+

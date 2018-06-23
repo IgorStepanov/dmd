@@ -1502,42 +1502,81 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                     Expression ve = new VarExp(loc, vd);
                     ve.type = tfront;
 
-                    auto exps = new Expressions();
-                    exps.push(ve);
-                    int pos = 0;
-                    while (exps.dim < dim)
-                    {
-                        pos = expandAliasThisTuples(exps, pos);
-                        if (pos == -1)
-                            break;
-                    }
-                    if (exps.dim != dim)
-                    {
-                        const(char)* plural = exps.dim > 1 ? "s" : "";
-                        fs.error("cannot infer argument types, expected %d argument%s, not %d",
-                            exps.dim, plural, dim);
-                        goto case Terror;
-                    }
 
-                    foreach (i; 0 .. dim)
+                    if (!ve.aliasthislock)
                     {
-                        auto p = (*fs.parameters)[i];
-                        auto exp = (*exps)[i];
-                        version (none)
+                        ve.aliasthislock = true;
+                        Expressions* exps = null;
+                        Expression[] ret = findTupleAliasThis(sc, ve, (Scope* sc, Expression ie, ref Expression oe)
                         {
-                            printf("[%d] p = %s %s, exp = %s %s\n", i,
-                                p.type ? p.type.toChars() : "?", p.ident.toChars(),
-                                exp.type.toChars(), exp.toChars());
-                        }
-                        if (!p.type)
-                            p.type = exp.type;
-                        p.type = p.type.addStorageClass(p.storageClass).typeSemantic(loc, sc2);
-                        if (!exp.implicitConvTo(p.type))
-                            goto Lrangeerr;
+                            
+                            ie.aliasthislock = true;
+                            assert(ie.op == TOK.tuple);
+                            TupleExp te = cast(TupleExp)ie;
 
-                        auto var = new VarDeclaration(loc, p.type, p.ident, new ExpInitializer(loc, exp));
-                        var.storage_class |= STC.ctfe | STC.ref_ | STC.foreach_;
-                        makeargs = new CompoundStatement(loc, makeargs, new ExpStatement(loc, var));
+                            if (te.exps.dim != dim)
+                            {
+                                return;
+                            }
+
+                            for (size_t i = 0; i < dim; i++)
+                            {
+                                auto p = (*fs.parameters)[i];
+                                auto exp = (*te.exps)[i];
+                                assert(exp.type);
+                                if (p.type)
+                                {
+                                    if (!exp.type.implicitConvTo(p.type))
+                                    {
+                                        return;
+                                    }
+                                }
+                            }
+
+                            oe = ie;
+                        });
+
+                        Expression one_ret = enforceOneResult(ret, ve.loc, "unable to unambiguously resolve foreach arguments");
+                        
+                        if (!one_ret || one_ret.op == TOK.error)
+                        {
+                            goto case Terror;
+                        }
+                        else
+                        {
+                            assert(one_ret.op == TOK.tuple);
+                            exps = (cast(TupleExp)one_ret).exps;
+                        }
+
+                        if (exps.dim != dim)
+                        {
+                            const(char)* plural = exps.dim > 1 ? "s" : "";
+                            fs.error("cannot infer argument types, expected %d argument%s, not %d",
+                                exps.dim, plural, dim);
+                            goto case Terror;
+                        }
+
+                        foreach (i; 0 .. dim)
+                        {
+                            auto p = (*fs.parameters)[i];
+                            auto exp = (*exps)[i];
+                            version (none)
+                            {
+                                printf("[%d] p = %s %s, exp = %s %s\n", i,
+                                    p.type ? p.type.toChars() : "?", p.ident.toChars(),
+                                    exp.type.toChars(), exp.toChars());
+                            }
+                            if (!p.type)
+                                p.type = exp.type;
+                            p.type = p.type.addStorageClass(p.storageClass).typeSemantic(loc, sc2);
+                            if (!exp.implicitConvTo(p.type))
+                                goto Lrangeerr;
+
+                            auto var = new VarDeclaration(loc, p.type, p.ident, new ExpInitializer(loc, exp));
+                            var.storage_class |= STC.ctfe | STC.ref_ | STC.foreach_;
+                            makeargs = new CompoundStatement(loc, makeargs, new ExpStatement(loc, var));
+                        }
+
                     }
                 }
 

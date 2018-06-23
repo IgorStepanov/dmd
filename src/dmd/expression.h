@@ -61,8 +61,6 @@ bool checkAccess(Loc loc, Scope *sc, Package *p);
 Expression *build_overload(const Loc &loc, Scope *sc, Expression *ethis, Expression *earg, Dsymbol *d);
 Dsymbol *search_function(ScopeDsymbol *ad, Identifier *funcid);
 void expandTuples(Expressions *exps);
-TupleDeclaration *isAliasThisTuple(Expression *e);
-int expandAliasThisTuples(Expressions *exps, size_t starti = 0);
 FuncDeclaration *hasThis(Scope *sc);
 Expression *fromConstInitializer(int result, Expression *e);
 bool arrayExpressionSemantic(Expressions *exps, Scope *sc, bool preserveErrors = false);

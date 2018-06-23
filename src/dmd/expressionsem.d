@@ -6594,49 +6594,28 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
              */
             if (exp.e1.op == TOK.tuple)
             {
-                TupleDeclaration td = isAliasThisTuple(e2x);
-                if (!td)
+                if (e2x.aliasthislock)
                     goto Lnomatch;
-
-                assert(exp.e1.type.ty == Ttuple);
-                TypeTuple tt = cast(TypeTuple)exp.e1.type;
-
-                Expression e0;
-                Expression ev = extractSideEffect(sc, "__tup", e0, e2x);
-
-                auto iexps = new Expressions();
-                iexps.push(ev);
-                for (size_t u = 0; u < iexps.dim; u++)
-                {
-                Lexpand:
-                    Expression e = (*iexps)[u];
-
-                    Parameter arg = Parameter.getNth(tt.arguments, u);
-                    //printf("[%d] iexps.dim = %d, ", u, iexps.dim);
-                    //printf("e = (%s %s, %s), ", Token::tochars[e.op], e.toChars(), e.type.toChars());
-                    //printf("arg = (%s, %s)\n", arg.toChars(), arg.type.toChars());
-
-                    if (!arg || !e.type.implicitConvTo(arg.type))
+                e2x.aliasthislock = true;
+                Expression[] ret = findTupleAliasThis(sc, e2x, (Scope* sc, Expression ie, ref Expression oe)
                     {
-                        // expand initializer to tuple
-                        if (expandAliasThisTuples(iexps, u) != -1)
+                        AssignExp ae = cast(AssignExp) exp.copy();
+                        ie.aliasthislock = true;
+                        ae.e2 = ie;
+
+                        Expression ret = ae.trySemantic(sc);
+                        if (ret)
                         {
-                            if (iexps.dim <= u)
-                                break;
-                            goto Lexpand;
+                            oe = ret;
                         }
-                        goto Lnomatch;
-                    }
-                }
-                e2x = new TupleExp(e2x.loc, e0, iexps);
-                e2x = e2x.expressionSemantic(sc);
-                if (e2x.op == TOK.error)
+                    });
+
+                Expression one_ret = enforceOneResult(ret, exp.loc, "unable to unambiguously resolve %s; candidates:", exp.toChars());
+                if (one_ret)
                 {
-                    result = e2x;
+                    result = one_ret;
                     return;
                 }
-                // Do not need to overwrite this.e2
-                goto Ltupleassign;
             }
         Lnomatch:
         }

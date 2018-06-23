@@ -718,8 +718,12 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             TypeTuple tt = cast(TypeTuple)tb;
             size_t nelems = Parameter.dim(tt.arguments);
             Expression ie = (dsym._init && !dsym._init.isVoidInitializer()) ? dsym._init.initializerToExpression() : null;
+            Expression iex = null;
             if (ie)
+            {
                 ie = ie.expressionSemantic(sc);
+                iex = ie.copy();
+            }
             if (nelems > 0 && ie)
             {
                 auto iexps = new Expressions();
@@ -731,9 +735,9 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                     Expression e = (*iexps)[pos];
                     Parameter arg = Parameter.getNth(tt.arguments, pos);
                     arg.type = arg.type.typeSemantic(dsym.loc, sc);
-                    //printf("[%d] iexps.dim = %d, ", pos, iexps.dim);
-                    //printf("e = (%s %s, %s), ", Token::tochars[e.op], e.toChars(), e.type.toChars());
-                    //printf("arg = (%s, %s)\n", arg.toChars(), arg.type.toChars());
+                    // printf("[%d] iexps.dim = %d, ", pos, iexps.dim);
+                    // printf("e = (%s %s, %s), ", Token.toChars(e.op), e.toChars(), e.type.toChars());
+                    // printf("arg = (%s, %s)\n", arg.toChars(), arg.type.toChars());
 
                     if (e != ie)
                     {
@@ -742,7 +746,6 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                         if (e.type.implicitConvTo(arg.type))
                             continue;
                     }
-
                     if (e.op == TOK.tuple)
                     {
                         TupleExp te = cast(TupleExp)e;
@@ -754,48 +757,6 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                         (*iexps)[pos] = Expression.combine(te.e0, (*iexps)[pos]);
                         goto Lexpand1;
                     }
-                    else if (isAliasThisTuple(e))
-                    {
-                        auto v = copyToTemp(0, "__tup", e);
-                        v.dsymbolSemantic(sc);
-                        auto ve = new VarExp(dsym.loc, v);
-                        ve.type = e.type;
-
-                        exps.setDim(1);
-                        (*exps)[0] = ve;
-                        expandAliasThisTuples(exps, 0);
-
-                        for (size_t u = 0; u < exps.dim; u++)
-                        {
-                        Lexpand2:
-                            Expression ee = (*exps)[u];
-                            arg = Parameter.getNth(tt.arguments, pos + u);
-                            arg.type = arg.type.typeSemantic(dsym.loc, sc);
-                            //printf("[%d+%d] exps.dim = %d, ", pos, u, exps.dim);
-                            //printf("ee = (%s %s, %s), ", Token::tochars[ee.op], ee.toChars(), ee.type.toChars());
-                            //printf("arg = (%s, %s)\n", arg.toChars(), arg.type.toChars());
-
-                            size_t iexps_dim = iexps.dim - 1 + exps.dim;
-                            if (iexps_dim > nelems)
-                                goto Lnomatch;
-                            if (ee.type.implicitConvTo(arg.type))
-                                continue;
-
-                            if (expandAliasThisTuples(exps, u) != -1)
-                                goto Lexpand2;
-                        }
-
-                        if ((*exps)[0] != ve)
-                        {
-                            Expression e0 = (*exps)[0];
-                            (*exps)[0] = new CommaExp(dsym.loc, new DeclarationExp(dsym.loc, v), e0);
-                            (*exps)[0].type = e0.type;
-
-                            iexps.remove(pos);
-                            iexps.insert(pos, exps);
-                            goto Lexpand1;
-                        }
-                    }
                 }
                 if (iexps.dim < nelems)
                     goto Lnomatch;
@@ -803,6 +764,35 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 ie = new TupleExp(dsym._init.loc, iexps);
             }
         Lnomatch:
+
+            if (nelems > 0 && iex && !iex.aliasthislock)
+            {
+                //VarDeclaration dsym
+                iex.aliasthislock = true;
+                Expression[] ret = findTupleAliasThis(sc, iex, (Scope* sc, Expression ine, ref Expression oe)
+                    {
+                        VarDeclaration vd = cast(VarDeclaration) dsym.syntaxCopy(null);
+                        ine.aliasthislock = true;
+
+                        vd._init = new ExpInitializer(dsym.loc, ine);
+                        uint errors = global.startGagging();
+                        vd.dsymbolSemantic(sc);
+
+                        if (!global.endGagging(errors))
+                        {
+                            oe = ine;
+                        }
+                    });
+
+                Expression one_ret = enforceOneResult(ret, dsym.loc, "unable to unambiguously resolve %s initializer; candidates:", dsym.toChars());
+                if (one_ret)
+                {
+                    //if (one_ret.op == TOK.error)
+                    //    return;
+                    ie = one_ret;
+                    ie.aliasthislock = true;
+                }
+            }
 
             if (ie && ie.op == TOK.tuple)
             {
