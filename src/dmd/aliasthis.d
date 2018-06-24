@@ -294,7 +294,7 @@ bool iterateAliasThis(Scope* sc, Expression e, bool delegate(Scope* sc, Expressi
  *      Type of alias this.
  */
 
-Type aliasThisOf(Type t, bool* islvalue = null)
+private Type aliasThisOf(Type t, bool* islvalue = null)
 {
     bool dummy;
     if (!islvalue)
@@ -1208,7 +1208,6 @@ private void expandAliasThisTuple(Scope* sc, TupleExp e, ref Expression[] ret)
                 assert(cur_at.op == TOK.tuple);
                 TupleExp tcur_at = cast(TupleExp) cur_at;
                 TupleExp e1 = cast(TupleExp) e.syntaxCopy();
-
                 for (size_t k = 0; k < i; k++)
                 {
                     (*e1.exps)[k].aliasthislock = true;

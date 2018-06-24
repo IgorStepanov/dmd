@@ -6603,6 +6603,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                         ie.aliasthislock = true;
                         ae.e2 = ie;
 
+                        
                         Expression ret = ae.trySemantic(sc);
                         if (ret)
                         {

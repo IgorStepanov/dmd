@@ -1509,9 +1509,9 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                         Expressions* exps = null;
                         Expression[] ret = findTupleAliasThis(sc, ve, (Scope* sc, Expression ie, ref Expression oe)
                         {
-                            
                             ie.aliasthislock = true;
                             assert(ie.op == TOK.tuple);
+                            //ie = ie.expressionSemantic(sc);
                             TupleExp te = cast(TupleExp)ie;
 
                             if (te.exps.dim != dim)
@@ -1526,6 +1526,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                                 assert(exp.type);
                                 if (p.type)
                                 {
+                                    p.type = p.type.typeSemantic(loc, sc2);
                                     if (!exp.type.implicitConvTo(p.type))
                                     {
                                         return;
@@ -1537,15 +1538,42 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                         });
 
                         Expression one_ret = enforceOneResult(ret, ve.loc, "unable to unambiguously resolve foreach arguments");
-                        
-                        if (!one_ret || one_ret.op == TOK.error)
+                        if (!one_ret)
                         {
+                            exps = new Expressions();
+                            exps.push(ve);
+                        }
+                        else if (one_ret.op == TOK.error)
+                        {
+                            printf("error\n", vd.toChars());
                             goto case Terror;
                         }
                         else
                         {
                             assert(one_ret.op == TOK.tuple);
-                            exps = (cast(TupleExp)one_ret).exps;
+                            auto te = cast(TupleExp)one_ret;
+                            exps = te.exps;
+                            if (te.e0)
+                            {
+                                for (size_t i = 0; i < dim; i++)
+                                {
+                                    Expression ei = (*exps)[i];
+                                    assert(te.e0.op == TOK.declaration);
+                                    DeclarationExp ve0 = cast(DeclarationExp)te.e0;
+                                    assert(ei.op == TOK.dotVariable);
+                                    DotVarExp dev = cast(DotVarExp)ei;
+                                    VarDeclaration ve0v = ve0.declaration.isVarDeclaration();
+                                    assert(ve0v);
+                                    assert(ve0v._init);
+                                    assert(ve0v._init.isExpInitializer());
+                                    auto e0init = ve0v._init.isExpInitializer();
+                                    assert(e0init.exp.op == TOK.construct);
+                                    ConstructExp ae0init = cast(ConstructExp)e0init.exp;
+                                    assert(ae0init.e2);
+                                    dev.e1 = ae0init.e2;
+                                    (*exps)[i] = dev.expressionSemantic(sc);
+                                }
+                            }
                         }
 
                         if (exps.dim != dim)

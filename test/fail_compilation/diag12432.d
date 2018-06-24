@@ -2,7 +2,7 @@
 TEST_OUTPUT:
 ---
 fail_compilation/diag12432.d(55): Error: cannot infer argument types, expected 1 argument, not 2
-fail_compilation/diag12432.d(56): Error: cannot infer argument types, expected 2 arguments, not 3
+fail_compilation/diag12432.d(56): Error: cannot infer argument types, expected 1 argument, not 3
 fail_compilation/diag12432.d(57): Error: cannot infer argument types, expected 1 argument, not 2
 fail_compilation/diag12432.d(58): Error: cannot infer argument types, expected 1 argument, not 2
 fail_compilation/diag12432.d(59): Error: cannot infer argument types, expected 2 arguments, not 3

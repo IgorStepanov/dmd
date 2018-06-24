@@ -777,7 +777,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                         vd._init = new ExpInitializer(dsym.loc, ine);
                         uint errors = global.startGagging();
                         vd.dsymbolSemantic(sc);
-
+                        
                         if (!global.endGagging(errors))
                         {
                             oe = ine;
